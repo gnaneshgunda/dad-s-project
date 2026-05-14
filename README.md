@@ -23,16 +23,25 @@ This is a full-stack web application that takes a short text input, expands it i
 
 The backend is built with Node.js and Express and communicates securely with the OpenAI API.
 
+First, open a terminal (Command Prompt, PowerShell, or Mac Terminal) and navigate to the project folder. Then, go into the `backend` folder and install the necessary packages:
+
 ```bash
 cd backend
 npm install
 ```
 
-**Adding your OpenAI API Key:**
-You must provide your OpenAI API key for the text expansion to work.
-1. Open the `backend` folder.
-2. Create a new text file named exactly `.env` (with the leading dot).
-3. Open this `.env` file in a text editor and add the following lines, replacing the placeholder with your actual key:
+**Step-by-Step: Adding your OpenAI API Key**
+
+You must provide your OpenAI API key for the text expansion to work. Here is exactly how to do it:
+
+1. **Get an API Key:** If you don't have one, go to the [OpenAI API Dashboard](https://platform.openai.com/api-keys), sign in, and click "Create new secret key". Copy that key.
+2. **Locate the backend folder:** In your project directory, open the folder named `backend`.
+3. **Create the file:** Inside the `backend` folder, create a brand new file. Name this file exactly `.env` (Notice the dot at the very beginning! There is no name before the dot, and no `.txt` at the end).
+   - *If using VS Code:* Right-click inside the `backend` folder in the sidebar -> New File -> type `.env` and hit Enter.
+   - *If using Mac/Linux Terminal:* Run `touch .env` inside the `backend` folder.
+   - *If using Windows:* You can open Notepad, and when saving, choose "Save as type: All Files" and name it `.env`.
+4. **Edit the file:** Open the newly created `.env` file in your text editor.
+5. **Paste your key:** Add the following text to the file. Make sure you replace `sk-proj-YourActualOpenAiKeyGoesHere` with the real key you copied from OpenAI. Do not put quotes around the key.
 
 ```env
 # Your OpenAI API key goes here
@@ -40,7 +49,11 @@ OPENAI_API_KEY=sk-proj-YourActualOpenAiKeyGoesHere
 PORT=3001
 ```
 
-Start the backend server:
+6. **Save:** Save the `.env` file.
+
+**Start the backend server:**
+
+Once the key is saved, run the following command in the `backend` folder to start the server:
 
 ```bash
 npm run dev
