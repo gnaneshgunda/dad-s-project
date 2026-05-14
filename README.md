@@ -21,17 +21,22 @@ This is a full-stack web application that takes a short text input, expands it i
 
 ### 1. Backend Setup
 
-The backend is built with Node.js and Express.
+The backend is built with Node.js and Express and communicates securely with the OpenAI API.
 
 ```bash
 cd backend
 npm install
 ```
 
-Create a `.env` file in the `backend` directory and add your OpenAI API key:
+**Adding your OpenAI API Key:**
+You must provide your OpenAI API key for the text expansion to work.
+1. Open the `backend` folder.
+2. Create a new text file named exactly `.env` (with the leading dot).
+3. Open this `.env` file in a text editor and add the following lines, replacing the placeholder with your actual key:
 
 ```env
-OPENAI_API_KEY=your_openai_api_key_here
+# Your OpenAI API key goes here
+OPENAI_API_KEY=sk-proj-YourActualOpenAiKeyGoesHere
 PORT=3001
 ```
 
