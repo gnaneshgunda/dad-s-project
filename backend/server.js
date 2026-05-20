@@ -234,27 +234,37 @@ app.post('/api/generate-audio', (req, res) => {
   }
 });
 
-// Helper to wrap text for canvas
+// Helper to wrap text for canvas, honoring newlines
 function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
-  const words = text.split(' ');
-  let line = '';
-  let testLine = '';
-  let testWidth = 0;
+  const paragraphs = text.split('\n');
+  let currentY = y;
 
-  for(let n = 0; n < words.length; n++) {
-    testLine = line + words[n] + ' ';
-    testWidth = ctx.measureText(testLine).width;
-    if (testWidth > maxWidth && n > 0) {
-      ctx.fillText(line, x, y);
-      line = words[n] + ' ';
-      y += lineHeight;
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i].trim();
+    if (!p) {
+      currentY += lineHeight; // Empty line for paragraph break
+      continue;
     }
-    else {
-      line = testLine;
+
+    const words = p.split(' ');
+    let line = '';
+
+    for(let n = 0; n < words.length; n++) {
+      let testLine = line + words[n] + ' ';
+      let testWidth = ctx.measureText(testLine).width;
+      if (testWidth > maxWidth && n > 0) {
+        ctx.fillText(line.trim(), x, currentY);
+        line = words[n] + ' ';
+        currentY += lineHeight;
+      }
+      else {
+        line = testLine;
+      }
     }
+    ctx.fillText(line.trim(), x, currentY);
+    currentY += lineHeight;
   }
-  ctx.fillText(line, x, y);
-  return y; // Return the final Y position
+  return currentY;
 }
 
 const ffprobePath = require('ffprobe-static').path;
@@ -295,16 +305,32 @@ app.post('/api/generate-video', async (req, res) => {
       return res.status(500).json({ error: 'Could not process audio track' });
     }
 
-    // 2. Split text into chunks for slides (approx 35 words per slide)
-    const words = text.split(' ');
-    const WORDS_PER_SLIDE = 35;
+    // 2. Clean Text and Split into chunks
+    // Remove markdown bolding and headings to prevent ugly rendering
+    const cleanText = text.replace(/\*\*/g, '').replace(/#/g, '').trim();
+
+    // Try to split by sentence/newline chunks to avoid cutting sentences midway
+    const sentences = cleanText.split(/(?<=[.?!])\s+|\n+/);
     const slides = [];
-    for (let i = 0; i < words.length; i += WORDS_PER_SLIDE) {
-      slides.push(words.slice(i, i + WORDS_PER_SLIDE).join(' '));
+    let currentSlide = '';
+    const IDEAL_CHARS_PER_SLIDE = 250;
+
+    for (const sentence of sentences) {
+      if (!sentence.trim()) continue;
+
+      if ((currentSlide.length + sentence.length) > IDEAL_CHARS_PER_SLIDE && currentSlide.length > 0) {
+        slides.push(currentSlide.trim());
+        currentSlide = sentence + ' ';
+      } else {
+        currentSlide += sentence + ' ';
+      }
+    }
+    if (currentSlide.trim()) {
+      slides.push(currentSlide.trim());
     }
 
-    // Calculate how long each slide should be displayed
-    const durationPerSlide = duration / slides.length;
+    // Calculate total character count to allocate duration proportionally
+    const totalChars = slides.reduce((sum, slide) => sum + slide.length, 0);
 
     // 3. Generate slide images
     const slidePaths = [];
@@ -326,25 +352,35 @@ app.post('/api/generate-video', async (req, res) => {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
-      // Wrap text logic
-      const slideWords = slideText.split(' ');
-      let lines = 1;
-      let lineText = '';
+      // Wrap text logic to compute height
+      const paragraphs = slideText.split('\n');
+      let lines = 0;
       const maxWidth = 1000;
-      for (let n = 0; n < slideWords.length; n++) {
-        let testLine = lineText + slideWords[n] + ' ';
-        let testWidth = ctx.measureText(testLine).width;
-        if (testWidth > maxWidth && n > 0) {
+      for (const p of paragraphs) {
+        if (!p.trim()) {
           lines++;
-          lineText = slideWords[n] + ' ';
-        } else {
-          lineText = testLine;
+          continue;
+        }
+        const slideWords = p.trim().split(' ');
+        let lineText = '';
+        lines++; // start first line of paragraph
+        for (let n = 0; n < slideWords.length; n++) {
+          let testLine = lineText + slideWords[n] + ' ';
+          let testWidth = ctx.measureText(testLine).width;
+          if (testWidth > maxWidth && n > 0) {
+            lines++;
+            lineText = slideWords[n] + ' ';
+          } else {
+            lineText = testLine;
+          }
         }
       }
 
       const lineHeight = 50;
       const totalHeight = lines * lineHeight;
       let startY = (720 - totalHeight) / 2;
+      // Adjust startY if it overflows top to at least have some padding
+      if (startY < 50) startY = 50;
 
       ctx.textAlign = 'center';
       wrapText(ctx, slideText, 640, startY, maxWidth, lineHeight);
@@ -358,9 +394,12 @@ app.post('/api/generate-video', async (req, res) => {
       slidePaths.push(slideFilePath);
 
       // Append to ffmpeg concat list file format
-      // Note: use forward slashes for ffmpeg cross-platform compat
+      // Proportional duration based on slide character length
+      let slideDuration = duration * (slideText.length / totalChars);
+      if (slideDuration < 1.5) slideDuration = 1.5; // guarantee minimum 1.5s reading time
+
       listContent += `file '${slideFilePath.replace(/\\/g, '/')}'\n`;
-      listContent += `duration ${durationPerSlide.toFixed(2)}\n`;
+      listContent += `duration ${slideDuration.toFixed(2)}\n`;
     }
 
     // FFmpeg requires the last file to be repeated without duration
