@@ -10,6 +10,8 @@ function Home() {
 
   const [promptType, setPromptType] = useState('explain-detailed');
   const [textLanguage, setTextLanguage] = useState('en');
+  const [aiProvider, setAiProvider] = useState('groq');
+  const [aiModel, setAiModel] = useState('llama-3.3-70b-versatile');
   const [audioLanguage, setAudioLanguage] = useState('en');
   const [outputType, setOutputType] = useState('audio'); // 'audio' or 'video'
 
@@ -92,6 +94,8 @@ function Home() {
       }
       formData.append('promptType', promptType);
       formData.append('language', textLanguage);
+      formData.append('aiProvider', aiProvider);
+      formData.append('aiModel', aiModel);
 
       const response = await axios.post(`${API_BASE_URL}/api/expand-text`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
@@ -232,7 +236,47 @@ function Home() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">AI Provider</label>
+              <select
+                value={aiProvider}
+                onChange={(e) => {
+                  setAiProvider(e.target.value);
+                  setAiModel(e.target.value === 'groq' ? 'llama-3.3-70b-versatile' : 'gemini-2.5-flash');
+                }}
+                className="w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500 p-2 border"
+              >
+                <option value="groq">Groq</option>
+                <option value="gemini">Gemini</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">AI Model</label>
+              <select
+                value={aiModel}
+                onChange={(e) => setAiModel(e.target.value)}
+                className="w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500 p-2 border"
+              >
+                {aiProvider === 'groq' ? (
+                  <>
+                    <option value="llama-3.3-70b-versatile">Llama 3.3 70B Versatile</option>
+                    <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant</option>
+                    <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+                    <option value="gemma2-9b-it">Gemma 2 9B</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                    <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                    <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                  </>
+                )}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">AI Task</label>
               <select

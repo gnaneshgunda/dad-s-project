@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Groq = require('groq-sdk');
 const gTTS = require('gtts');
 const fs = require('fs');
 const path = require('path');
@@ -28,17 +29,29 @@ const port = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Manage multiple API keys
-const geminiApiKeys = process.env.GEMINI_API_KEYS ? process.env.GEMINI_API_KEYS.split(',') : [process.env.GEMINI_API_KEY];
-let currentKeyIndex = 0;
+// Manage multiple API keys for Gemini
+const geminiApiKeys = process.env.GEMINI_API_KEYS ? process.env.GEMINI_API_KEYS.split(',') : (process.env.GEMINI_API_KEY ? [process.env.GEMINI_API_KEY] : []);
+let currentGeminiKeyIndex = 0;
 
-function getNextModel() {
-  const key = geminiApiKeys[currentKeyIndex].trim();
-  currentKeyIndex = (currentKeyIndex + 1) % geminiApiKeys.length;
+function getNextGeminiModel(modelName = 'gemini-2.5-flash') {
+  if (geminiApiKeys.length === 0) throw new Error("GEMINI_API_KEY is not set.");
+  const key = geminiApiKeys[currentGeminiKeyIndex].trim();
+  currentGeminiKeyIndex = (currentGeminiKeyIndex + 1) % geminiApiKeys.length;
   const genAI = new GoogleGenerativeAI(key);
   return genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    model: modelName,
   });
+}
+
+// Manage multiple API keys for Groq
+const groqApiKeys = process.env.GROQ_API_KEYS ? process.env.GROQ_API_KEYS.split(',') : (process.env.GROQ_API_KEY ? [process.env.GROQ_API_KEY] : []);
+let currentGroqKeyIndex = 0;
+
+function getNextGroqClient() {
+  if (groqApiKeys.length === 0) throw new Error("GROQ_API_KEY is not set.");
+  const key = groqApiKeys[currentGroqKeyIndex].trim();
+  currentGroqKeyIndex = (currentGroqKeyIndex + 1) % groqApiKeys.length;
+  return new Groq({ apiKey: key });
 }
 
 // Ensure audio directory exists
@@ -56,10 +69,12 @@ if (!fs.existsSync(videoDir)) {
 // Authentication Endpoints
 
 app.post('/api/signup', async (req, res) => {
-  const { email, password } = req.body;
+  let { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' });
   }
+
+  email = email.trim().toLowerCase();
 
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -80,10 +95,12 @@ app.post('/api/signup', async (req, res) => {
 });
 
 app.post('/api/login', (req, res) => {
-  const { email, password } = req.body;
+  let { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' });
   }
+
+  email = email.trim().toLowerCase();
 
   db.get('SELECT * FROM users WHERE email = ?', [email], async (err, user) => {
     if (err) return res.status(500).json({ error: 'Database error' });
@@ -99,7 +116,7 @@ app.post('/api/login', (req, res) => {
 
 // Endpoint 1: Expand text (and handle file uploads)
 app.post('/api/expand-text', upload.single('file'), async (req, res) => {
-  let { text, promptType, language } = req.body;
+  let { text, promptType, language, aiProvider, aiModel } = req.body;
   const file = req.file;
 
   if (!text && !file) {
@@ -142,11 +159,26 @@ Text:
 ${contentToExplain}
 `;
 
-    const currentModel = getNextModel();
-    const result = await currentModel.generateContent(prompt);
+    let expandedText = '';
 
-    const response = await result.response;
-    const expandedText = response.text();
+    if (aiProvider === 'groq') {
+      const groq = getNextGroqClient();
+      const model = aiModel || 'llama-3.3-70b-versatile';
+      const completion = await groq.chat.completions.create({
+        messages: [
+          { role: 'user', content: prompt }
+        ],
+        model: model,
+      });
+      expandedText = completion.choices[0]?.message?.content || '';
+    } else {
+      // Default to gemini
+      const modelName = aiModel || 'gemini-2.5-flash';
+      const currentModel = getNextGeminiModel(modelName);
+      const result = await currentModel.generateContent(prompt);
+      const response = await result.response;
+      expandedText = response.text();
+    }
 
     res.json({ expandedText });
 
@@ -228,15 +260,17 @@ app.post('/api/generate-video', async (req, res) => {
     .replace(/'/g, "\\'")
     .replace(/"/g, '\\"');
 
+  const blackBackgroundPath = path.join(__dirname, 'black_background.jpg');
+
   ffmpeg()
-    .input('color=c=black:s=1280x720')
-    .inputFormat('lavfi')
+    .input(blackBackgroundPath)
+    .loop(1)
     .input(audioFilePath)
     .videoCodec('libx264')
     .audioCodec('aac')
     .outputOptions([
       '-shortest', // Stop encoding when the shortest stream (audio) ends
-      '-vf', `drawtext=text='${escapedText}':fontcolor=white:fontsize=24:x=(w-text_w)/2:y=(h-text_h)/2`
+      '-vf', `scale=1280:720,drawtext=text='${escapedText}':fontcolor=white:fontsize=24:x=(w-text_w)/2:y=(h-text_h)/2`
     ])
     .save(videoFilePath)
     .on('end', () => {
