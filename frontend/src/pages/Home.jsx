@@ -15,14 +15,32 @@ function Home() {
   const [audioLanguage, setAudioLanguage] = useState('en');
   const [outputType, setOutputType] = useState('audio'); // 'audio' or 'video'
 
-  const [expandedText, setExpandedText] = useState('');
+  const [expandedText, setExpandedText] = useState(() => sessionStorage.getItem('expandedText') || '');
   const [isExpanding, setIsExpanding] = useState(false);
-  const [currentHistoryId, setCurrentHistoryId] = useState(null);
+  const [currentHistoryId, setCurrentHistoryId] = useState(() => sessionStorage.getItem('currentHistoryId') || null);
 
   const [isGeneratingMedia, setIsGeneratingMedia] = useState(false);
-  const [audioUrl, setAudioUrl] = useState('');
-  const [videoUrl, setVideoUrl] = useState('');
+  const [audioUrl, setAudioUrl] = useState(() => sessionStorage.getItem('audioUrl') || '');
+  const [videoUrl, setVideoUrl] = useState(() => sessionStorage.getItem('videoUrl') || '');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Persist state to sessionStorage so it survives navigation
+  useEffect(() => {
+    sessionStorage.setItem('expandedText', expandedText);
+  }, [expandedText]);
+
+  useEffect(() => {
+    if (currentHistoryId) sessionStorage.setItem('currentHistoryId', currentHistoryId);
+    else sessionStorage.removeItem('currentHistoryId');
+  }, [currentHistoryId]);
+
+  useEffect(() => {
+    sessionStorage.setItem('audioUrl', audioUrl);
+  }, [audioUrl]);
+
+  useEffect(() => {
+    sessionStorage.setItem('videoUrl', videoUrl);
+  }, [videoUrl]);
 
   // Audio Player State
   const waveformRef = useRef(null);
@@ -103,6 +121,7 @@ function Home() {
       });
       const generatedText = response.data.expandedText;
       setExpandedText(generatedText);
+      sessionStorage.setItem('expandedText', generatedText); // Ensure immediate cache
 
       // Save to history immediately
       try {
@@ -142,6 +161,7 @@ function Home() {
 
       const generatedAudioUrl = audioResponse.data.audioUrl;
       setAudioUrl(generatedAudioUrl);
+      sessionStorage.setItem('audioUrl', generatedAudioUrl);
 
       // 2. Generate Video if requested
       let generatedVideoUrl = '';
@@ -152,6 +172,7 @@ function Home() {
         });
         generatedVideoUrl = videoResponse.data.videoUrl;
         setVideoUrl(generatedVideoUrl);
+        sessionStorage.setItem('videoUrl', generatedVideoUrl);
       }
 
       // 3. Update existing History record with media URLs

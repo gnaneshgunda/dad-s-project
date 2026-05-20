@@ -257,6 +257,9 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
   return y; // Return the final Y position
 }
 
+const ffprobePath = require('ffprobe-static').path;
+ffmpeg.setFfprobePath(ffprobePath);
+
 // Endpoint 2.5: Generate video
 app.post('/api/generate-video', async (req, res) => {
   const { audioUrl, text } = req.body;
@@ -265,7 +268,6 @@ app.post('/api/generate-video', async (req, res) => {
     return res.status(400).json({ error: 'audioUrl and text are required' });
   }
 
-  // Extract just the filename from the audioUrl (e.g., /api/audio/123.mp3 -> 123.mp3)
   const audioFilename = audioUrl.split('/').pop();
   const audioFilePath = path.join(audioDir, audioFilename);
 
@@ -275,72 +277,120 @@ app.post('/api/generate-video', async (req, res) => {
 
   const videoFilename = `${uuidv4()}.mp4`;
   const videoFilePath = path.join(videoDir, videoFilename);
-  const slideFilename = `${uuidv4()}.jpg`;
-  const slideFilePath = path.join(videoDir, slideFilename);
 
   try {
-    // 1. Create a slide using Canvas
-    const canvas = createCanvas(1280, 720);
-    const ctx = canvas.getContext('2d');
+    // 1. Get Audio Duration
+    const getAudioDuration = () => new Promise((resolve, reject) => {
+      ffmpeg.ffprobe(audioFilePath, (err, metadata) => {
+        if (err) reject(err);
+        else resolve(metadata.format.duration);
+      });
+    });
 
-    // Background
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, 1280, 720);
-
-    // Text styling
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '30px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    // Wrap text and draw
-    // Approximate total height to center the block of text
-    const words = text.split(' ');
-    let lines = 1;
-    let lineText = '';
-    const maxWidth = 1000;
-    for(let n = 0; n < words.length; n++) {
-      let testLine = lineText + words[n] + ' ';
-      let testWidth = ctx.measureText(testLine).width;
-      if (testWidth > maxWidth && n > 0) {
-        lines++;
-        lineText = words[n] + ' ';
-      } else {
-        lineText = testLine;
-      }
+    let duration;
+    try {
+      duration = await getAudioDuration();
+    } catch (err) {
+      console.error("Could not read audio duration", err);
+      return res.status(500).json({ error: 'Could not process audio track' });
     }
 
-    const lineHeight = 40;
-    const totalHeight = lines * lineHeight;
-    let startY = (720 - totalHeight) / 2;
+    // 2. Split text into chunks for slides (approx 35 words per slide)
+    const words = text.split(' ');
+    const WORDS_PER_SLIDE = 35;
+    const slides = [];
+    for (let i = 0; i < words.length; i += WORDS_PER_SLIDE) {
+      slides.push(words.slice(i, i + WORDS_PER_SLIDE).join(' '));
+    }
 
-    ctx.textAlign = 'center';
-    wrapText(ctx, text, 640, startY, maxWidth, lineHeight);
+    // Calculate how long each slide should be displayed
+    const durationPerSlide = duration / slides.length;
 
-    // Save image to disk
-    const buffer = canvas.toBuffer('image/jpeg');
-    fs.writeFileSync(slideFilePath, buffer);
+    // 3. Generate slide images
+    const slidePaths = [];
+    const listFilePath = path.join(videoDir, `${uuidv4()}_list.txt`);
+    let listContent = '';
 
-    // 2. Generate video using the slide
+    for (let i = 0; i < slides.length; i++) {
+      const slideText = slides[i];
+      const canvas = createCanvas(1280, 720);
+      const ctx = canvas.getContext('2d');
+
+      // Background
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, 1280, 720);
+
+      // Text styling
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '36px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Wrap text logic
+      const slideWords = slideText.split(' ');
+      let lines = 1;
+      let lineText = '';
+      const maxWidth = 1000;
+      for (let n = 0; n < slideWords.length; n++) {
+        let testLine = lineText + slideWords[n] + ' ';
+        let testWidth = ctx.measureText(testLine).width;
+        if (testWidth > maxWidth && n > 0) {
+          lines++;
+          lineText = slideWords[n] + ' ';
+        } else {
+          lineText = testLine;
+        }
+      }
+
+      const lineHeight = 50;
+      const totalHeight = lines * lineHeight;
+      let startY = (720 - totalHeight) / 2;
+
+      ctx.textAlign = 'center';
+      wrapText(ctx, slideText, 640, startY, maxWidth, lineHeight);
+
+      // Save slide to disk
+      const slideFilename = `${uuidv4()}_slide.jpg`;
+      const slideFilePath = path.join(videoDir, slideFilename);
+      const buffer = canvas.toBuffer('image/jpeg');
+      fs.writeFileSync(slideFilePath, buffer);
+
+      slidePaths.push(slideFilePath);
+
+      // Append to ffmpeg concat list file format
+      // Note: use forward slashes for ffmpeg cross-platform compat
+      listContent += `file '${slideFilePath.replace(/\\/g, '/')}'\n`;
+      listContent += `duration ${durationPerSlide.toFixed(2)}\n`;
+    }
+
+    // FFmpeg requires the last file to be repeated without duration
+    listContent += `file '${slidePaths[slidePaths.length - 1].replace(/\\/g, '/')}'\n`;
+
+    fs.writeFileSync(listFilePath, listContent);
+
+    // 4. Generate video by combining slides and audio
     ffmpeg()
-      .input(slideFilePath)
-      .loop(1)
+      .input(listFilePath)
+      .inputOptions(['-f concat', '-safe 0'])
       .input(audioFilePath)
       .videoCodec('libx264')
       .audioCodec('aac')
       .outputOptions([
-        '-shortest', // Stop encoding when the shortest stream (audio) ends
-        '-pix_fmt', 'yuv420p' // Required for web compatibility
+        '-pix_fmt', 'yuv420p',
+        '-shortest'
       ])
       .save(videoFilePath)
       .on('end', () => {
-        // Cleanup the temporary slide image
-        try { fs.unlinkSync(slideFilePath); } catch (e) {}
+        // Cleanup all temporary slide images and list file
+        slidePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+        try { fs.unlinkSync(listFilePath); } catch (e) {}
+
         res.json({ videoUrl: `/api/video/${videoFilename}` });
       })
       .on('error', (err) => {
         console.error('Error generating video:', err);
-        try { fs.unlinkSync(slideFilePath); } catch (e) {}
+        slidePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+        try { fs.unlinkSync(listFilePath); } catch (e) {}
         res.status(500).json({ error: 'Failed to generate video' });
       });
   } catch (error) {
