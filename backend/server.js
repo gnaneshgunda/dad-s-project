@@ -6,6 +6,7 @@ const Groq = require('groq-sdk');
 const gTTS = require('gtts');
 const fs = require('fs');
 const path = require('path');
+const { createCanvas } = require('canvas');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -206,28 +207,55 @@ app.post('/api/generate-audio', (req, res) => {
     const filename = `${uuidv4()}.mp3`;
     const filepath = path.join(audioDir, filename);
 
-    gtts.save(filepath, (err) => {
-      if (err) {
-        console.error('Error generating audio:', err);
+    // Spawn a child process to generate the audio, so that if the `request` network stream
+    // used internally by `gtts` emits an unhandled error (like ETIMEDOUT), it only crashes
+    // the child process and leaves our main Express server running smoothly.
 
-        return res.status(500).json({
-          error: 'Failed to generate audio',
-        });
+    const { spawn } = require('child_process');
+    const child = spawn('node', ['generateAudioChild.js', text, lang, filepath], { cwd: __dirname });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        res.json({ audioUrl: `/api/audio/${filename}` });
+      } else {
+        console.error(`gTTS child process exited with code ${code}. Likely a network timeout.`);
+        res.status(500).json({ error: 'Failed to generate audio (Connection Error)' });
       }
+    });
 
-      res.json({
-        audioUrl: `/api/audio/${filename}`,
-      });
+    child.on('error', (err) => {
+      console.error('Failed to start gTTS child process:', err);
+      res.status(500).json({ error: 'Failed to generate audio' });
     });
 
   } catch (error) {
     console.error('Error setting up gTTS:', error);
-
-    res.status(500).json({
-      error: 'Failed to generate audio',
-    });
+    res.status(500).json({ error: 'Failed to generate audio' });
   }
 });
+
+// Helper to wrap text for canvas
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(' ');
+  let line = '';
+  let testLine = '';
+  let testWidth = 0;
+
+  for(let n = 0; n < words.length; n++) {
+    testLine = line + words[n] + ' ';
+    testWidth = ctx.measureText(testLine).width;
+    if (testWidth > maxWidth && n > 0) {
+      ctx.fillText(line, x, y);
+      line = words[n] + ' ';
+      y += lineHeight;
+    }
+    else {
+      line = testLine;
+    }
+  }
+  ctx.fillText(line, x, y);
+  return y; // Return the final Y position
+}
 
 // Endpoint 2.5: Generate video
 app.post('/api/generate-video', async (req, res) => {
@@ -247,39 +275,78 @@ app.post('/api/generate-video', async (req, res) => {
 
   const videoFilename = `${uuidv4()}.mp4`;
   const videoFilePath = path.join(videoDir, videoFilename);
+  const slideFilename = `${uuidv4()}.jpg`;
+  const slideFilePath = path.join(videoDir, slideFilename);
 
-  // Generate a basic video with a solid background and scrolling text or just centered text
-  // Using ffmpeg drawtext filter
-  // We'll wrap text a bit using regex
-  const wrappedText = text.replace(/(?![^\n]{1,40}$)([^\n]{1,40})\s/g, '$1\n');
+  try {
+    // 1. Create a slide using Canvas
+    const canvas = createCanvas(1280, 720);
+    const ctx = canvas.getContext('2d');
 
-  // Escape for FFmpeg drawtext
-  const escapedText = wrappedText
-    .replace(/\\/g, '\\\\')
-    .replace(/:/g, '\\:')
-    .replace(/'/g, "\\'")
-    .replace(/"/g, '\\"');
+    // Background
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, 1280, 720);
 
-  const blackBackgroundPath = path.join(__dirname, 'black_background.jpg');
+    // Text styling
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '30px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
 
-  ffmpeg()
-    .input(blackBackgroundPath)
-    .loop(1)
-    .input(audioFilePath)
-    .videoCodec('libx264')
-    .audioCodec('aac')
-    .outputOptions([
-      '-shortest', // Stop encoding when the shortest stream (audio) ends
-      '-vf', `scale=1280:720,drawtext=text='${escapedText}':fontcolor=white:fontsize=24:x=(w-text_w)/2:y=(h-text_h)/2`
-    ])
-    .save(videoFilePath)
-    .on('end', () => {
-      res.json({ videoUrl: `/api/video/${videoFilename}` });
-    })
-    .on('error', (err) => {
-      console.error('Error generating video:', err);
-      res.status(500).json({ error: 'Failed to generate video' });
-    });
+    // Wrap text and draw
+    // Approximate total height to center the block of text
+    const words = text.split(' ');
+    let lines = 1;
+    let lineText = '';
+    const maxWidth = 1000;
+    for(let n = 0; n < words.length; n++) {
+      let testLine = lineText + words[n] + ' ';
+      let testWidth = ctx.measureText(testLine).width;
+      if (testWidth > maxWidth && n > 0) {
+        lines++;
+        lineText = words[n] + ' ';
+      } else {
+        lineText = testLine;
+      }
+    }
+
+    const lineHeight = 40;
+    const totalHeight = lines * lineHeight;
+    let startY = (720 - totalHeight) / 2;
+
+    ctx.textAlign = 'center';
+    wrapText(ctx, text, 640, startY, maxWidth, lineHeight);
+
+    // Save image to disk
+    const buffer = canvas.toBuffer('image/jpeg');
+    fs.writeFileSync(slideFilePath, buffer);
+
+    // 2. Generate video using the slide
+    ffmpeg()
+      .input(slideFilePath)
+      .loop(1)
+      .input(audioFilePath)
+      .videoCodec('libx264')
+      .audioCodec('aac')
+      .outputOptions([
+        '-shortest', // Stop encoding when the shortest stream (audio) ends
+        '-pix_fmt', 'yuv420p' // Required for web compatibility
+      ])
+      .save(videoFilePath)
+      .on('end', () => {
+        // Cleanup the temporary slide image
+        try { fs.unlinkSync(slideFilePath); } catch (e) {}
+        res.json({ videoUrl: `/api/video/${videoFilename}` });
+      })
+      .on('error', (err) => {
+        console.error('Error generating video:', err);
+        try { fs.unlinkSync(slideFilePath); } catch (e) {}
+        res.status(500).json({ error: 'Failed to generate video' });
+      });
+  } catch (error) {
+    console.error('Error in video generation process:', error);
+    res.status(500).json({ error: 'Failed to process video generation' });
+  }
 });
 
 // Endpoint 3: Serve audio file
@@ -331,6 +398,25 @@ app.post('/api/history', authMiddleware, (req, res) => {
         return res.status(500).json({ error: 'Failed to save history' });
       }
       res.status(201).json({ id: this.lastID, message: 'Saved to history successfully' });
+    }
+  );
+});
+
+// Update history entry
+app.put('/api/history/:id', authMiddleware, (req, res) => {
+  const { audioUrl, videoUrl } = req.body;
+  const userId = req.user.id;
+  const historyId = req.params.id;
+
+  db.run(
+    'UPDATE history SET audio_url = ?, video_url = ? WHERE id = ? AND user_id = ?',
+    [audioUrl, videoUrl, historyId, userId],
+    function(err) {
+      if (err) {
+        console.error('Error updating history:', err);
+        return res.status(500).json({ error: 'Failed to update history' });
+      }
+      res.json({ message: 'History updated successfully' });
     }
   );
 });
