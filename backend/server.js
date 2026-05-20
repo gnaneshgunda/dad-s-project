@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Groq = require('groq-sdk');
 const gTTS = require('gtts');
 const fs = require('fs');
 const path = require('path');
@@ -28,17 +29,29 @@ const port = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Manage multiple API keys
-const geminiApiKeys = process.env.GEMINI_API_KEYS ? process.env.GEMINI_API_KEYS.split(',') : [process.env.GEMINI_API_KEY];
-let currentKeyIndex = 0;
+// Manage multiple API keys for Gemini
+const geminiApiKeys = process.env.GEMINI_API_KEYS ? process.env.GEMINI_API_KEYS.split(',') : (process.env.GEMINI_API_KEY ? [process.env.GEMINI_API_KEY] : []);
+let currentGeminiKeyIndex = 0;
 
-function getNextModel() {
-  const key = geminiApiKeys[currentKeyIndex].trim();
-  currentKeyIndex = (currentKeyIndex + 1) % geminiApiKeys.length;
+function getNextGeminiModel(modelName = 'gemini-2.5-flash') {
+  if (geminiApiKeys.length === 0) throw new Error("GEMINI_API_KEY is not set.");
+  const key = geminiApiKeys[currentGeminiKeyIndex].trim();
+  currentGeminiKeyIndex = (currentGeminiKeyIndex + 1) % geminiApiKeys.length;
   const genAI = new GoogleGenerativeAI(key);
   return genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    model: modelName,
   });
+}
+
+// Manage multiple API keys for Groq
+const groqApiKeys = process.env.GROQ_API_KEYS ? process.env.GROQ_API_KEYS.split(',') : (process.env.GROQ_API_KEY ? [process.env.GROQ_API_KEY] : []);
+let currentGroqKeyIndex = 0;
+
+function getNextGroqClient() {
+  if (groqApiKeys.length === 0) throw new Error("GROQ_API_KEY is not set.");
+  const key = groqApiKeys[currentGroqKeyIndex].trim();
+  currentGroqKeyIndex = (currentGroqKeyIndex + 1) % groqApiKeys.length;
+  return new Groq({ apiKey: key });
 }
 
 // Ensure audio directory exists
@@ -99,7 +112,7 @@ app.post('/api/login', (req, res) => {
 
 // Endpoint 1: Expand text (and handle file uploads)
 app.post('/api/expand-text', upload.single('file'), async (req, res) => {
-  let { text, promptType, language } = req.body;
+  let { text, promptType, language, aiProvider, aiModel } = req.body;
   const file = req.file;
 
   if (!text && !file) {
@@ -142,11 +155,26 @@ Text:
 ${contentToExplain}
 `;
 
-    const currentModel = getNextModel();
-    const result = await currentModel.generateContent(prompt);
+    let expandedText = '';
 
-    const response = await result.response;
-    const expandedText = response.text();
+    if (aiProvider === 'groq') {
+      const groq = getNextGroqClient();
+      const model = aiModel || 'llama-3.3-70b-versatile';
+      const completion = await groq.chat.completions.create({
+        messages: [
+          { role: 'user', content: prompt }
+        ],
+        model: model,
+      });
+      expandedText = completion.choices[0]?.message?.content || '';
+    } else {
+      // Default to gemini
+      const modelName = aiModel || 'gemini-2.5-flash';
+      const currentModel = getNextGeminiModel(modelName);
+      const result = await currentModel.generateContent(prompt);
+      const response = await result.response;
+      expandedText = response.text();
+    }
 
     res.json({ expandedText });
 
