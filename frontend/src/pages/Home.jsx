@@ -17,6 +17,7 @@ function Home() {
 
   const [expandedText, setExpandedText] = useState('');
   const [isExpanding, setIsExpanding] = useState(false);
+  const [currentHistoryId, setCurrentHistoryId] = useState(null);
 
   const [isGeneratingMedia, setIsGeneratingMedia] = useState(false);
   const [audioUrl, setAudioUrl] = useState('');
@@ -100,7 +101,27 @@ function Home() {
       const response = await axios.post(`${API_BASE_URL}/api/expand-text`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      setExpandedText(response.data.expandedText);
+      const generatedText = response.data.expandedText;
+      setExpandedText(generatedText);
+
+      // Save to history immediately
+      try {
+        const token = localStorage.getItem('token');
+        if (token) {
+          const historyResponse = await axios.post(`${API_BASE_URL}/api/history`, {
+            title: (inputType === 'text' ? inputText.substring(0, 50) : selectedFile?.name) || 'Generated Content',
+            text: generatedText,
+            audioUrl: '',
+            videoUrl: ''
+          }, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          setCurrentHistoryId(historyResponse.data.id);
+        }
+      } catch (historyErr) {
+        console.error('Failed to save initial history:', historyErr);
+      }
+
     } catch (error) {
       console.error('Error expanding text:', error);
       alert('Failed to process input.');
@@ -133,17 +154,17 @@ function Home() {
         setVideoUrl(generatedVideoUrl);
       }
 
-      // 3. Save to History
+      // 3. Update existing History record with media URLs
       setIsSaving(true);
       const token = localStorage.getItem('token');
-      await axios.post(`${API_BASE_URL}/api/history`, {
-        title: (inputType === 'text' ? inputText.substring(0, 50) : selectedFile?.name) || 'Generated Content',
-        text: expandedText,
-        audioUrl: generatedAudioUrl,
-        videoUrl: generatedVideoUrl
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      if (token && currentHistoryId) {
+        await axios.put(`${API_BASE_URL}/api/history/${currentHistoryId}`, {
+          audioUrl: generatedAudioUrl,
+          videoUrl: generatedVideoUrl
+        }, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      }
 
     } catch (error) {
       console.error('Error generating media:', error);
