@@ -1,3 +1,4 @@
 server.log
 *.mp3
 audio/
+node_modules/
