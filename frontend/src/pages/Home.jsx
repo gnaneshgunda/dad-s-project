@@ -466,18 +466,6 @@ function Home() {
               </div>
 
               <div className="flex gap-2">
-                {videoUrl && (
-                  <a
-                    href={`${API_BASE_URL}${videoUrl}`}
-                    download="explanation.mp4"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-colors"
-                  >
-                    <Video className="h-4 w-4 mr-2" />
-                    Video
-                  </a>
-                )}
                 <a
                   href={`${API_BASE_URL}${audioUrl}`}
                   download="explanation.mp3"
@@ -486,7 +474,7 @@ function Home() {
                   className="flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-colors"
                 >
                   <Download className="h-4 w-4 mr-2" />
-                  Audio
+                  Download Audio
                 </a>
               </div>
             </div>
@@ -496,11 +484,23 @@ function Home() {
         {/* Video Player Section */}
         {videoUrl && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 transition-all duration-500">
-             <h2 className="text-lg font-medium text-gray-900 mb-4">Video Player</h2>
+             <div className="flex justify-between items-center mb-4">
+               <h2 className="text-lg font-medium text-gray-900">Video Player</h2>
+               <a
+                 href={`${API_BASE_URL}${videoUrl}`}
+                 download="explanation.mp4"
+                 target="_blank"
+                 rel="noreferrer"
+                 className="flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-colors"
+               >
+                 <Download className="h-4 w-4 mr-2" />
+                 Download Video
+               </a>
+             </div>
              <video
                src={`${API_BASE_URL}${videoUrl}`}
                controls
-               className="w-full rounded-md shadow-sm"
+               className="w-full rounded-md shadow-sm bg-black"
              />
           </div>
         )}
