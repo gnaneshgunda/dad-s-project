@@ -428,7 +428,7 @@ function Home() {
                 {isGeneratingMedia ? (
                   <>
                     <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" />
-                    Generating Media...
+                    {outputType === 'video' ? 'Generating Video (This may take a few minutes)...' : 'Generating Audio...'}
                   </>
                 ) : (
                   `Generate ${outputType === 'video' ? 'Video' : 'Audio'}`
