@@ -153,29 +153,38 @@ function Home() {
     if (!expandedText.trim()) return;
     setIsGeneratingMedia(true);
     try {
-      // 1. Generate Audio
-      const audioResponse = await axios.post(`${API_BASE_URL}/api/generate-audio`, {
-        text: expandedText,
-        language: audioLanguage
-      });
-
-      const generatedAudioUrl = audioResponse.data.audioUrl;
-      setAudioUrl(generatedAudioUrl);
-      sessionStorage.setItem('audioUrl', generatedAudioUrl);
-
-      // 2. Generate Video if requested
+      let generatedAudioUrl = '';
       let generatedVideoUrl = '';
+
       if (outputType === 'video') {
         const videoResponse = await axios.post(`${API_BASE_URL}/api/generate-video`, {
-          audioUrl: generatedAudioUrl,
-          text: expandedText
+          text: expandedText,
+          aiProvider: aiProvider,
+          aiModel: aiModel,
+          language: audioLanguage
         });
+
         generatedVideoUrl = videoResponse.data.videoUrl;
         setVideoUrl(generatedVideoUrl);
         sessionStorage.setItem('videoUrl', generatedVideoUrl);
+
+        // The video endpoint now also returns the combined audio
+        generatedAudioUrl = videoResponse.data.audioUrl;
+        setAudioUrl(generatedAudioUrl);
+        sessionStorage.setItem('audioUrl', generatedAudioUrl);
+      } else {
+        // Audio Only
+        const audioResponse = await axios.post(`${API_BASE_URL}/api/generate-audio`, {
+          text: expandedText,
+          language: audioLanguage
+        });
+
+        generatedAudioUrl = audioResponse.data.audioUrl;
+        setAudioUrl(generatedAudioUrl);
+        sessionStorage.setItem('audioUrl', generatedAudioUrl);
       }
 
-      // 3. Update existing History record with media URLs
+      // Update existing History record with media URLs
       setIsSaving(true);
       const token = localStorage.getItem('token');
       if (token && currentHistoryId) {

@@ -272,73 +272,113 @@ ffmpeg.setFfprobePath(ffprobePath);
 
 // Endpoint 2.5: Generate video
 app.post('/api/generate-video', async (req, res) => {
-  const { audioUrl, text } = req.body;
+  const { text, aiProvider, aiModel, language } = req.body;
 
-  if (!audioUrl || !text) {
-    return res.status(400).json({ error: 'audioUrl and text are required' });
-  }
-
-  const audioFilename = audioUrl.split('/').pop();
-  const audioFilePath = path.join(audioDir, audioFilename);
-
-  if (!fs.existsSync(audioFilePath)) {
-    return res.status(404).json({ error: 'Audio file not found' });
+  if (!text) {
+    return res.status(400).json({ error: 'text is required' });
   }
 
   const videoFilename = `${uuidv4()}.mp4`;
+  const combinedAudioFilename = `${uuidv4()}.mp3`;
   const videoFilePath = path.join(videoDir, videoFilename);
+  const combinedAudioFilePath = path.join(audioDir, combinedAudioFilename);
+
+  // We'll store temporary paths to clean them up later
+  const slidePaths = [];
+  const audioPaths = [];
+  const audioListFilePath = path.join(videoDir, `${uuidv4()}_audio_list.txt`);
+  const videoListFilePath = path.join(videoDir, `${uuidv4()}_video_list.txt`);
 
   try {
-    // 1. Get Audio Duration
-    const getAudioDuration = () => new Promise((resolve, reject) => {
-      ffmpeg.ffprobe(audioFilePath, (err, metadata) => {
-        if (err) reject(err);
-        else resolve(metadata.format.duration);
+    // 1. Generate JSON slides from the text
+    const prompt = `You are a video presentation assistant. Given the following detailed text, break it down into logical presentation slides.
+For each slide, provide:
+1. "slide_text": A concise summary or bullet points suitable for a visual slide (max 150 characters). Do not use markdown bolding or complex formatting.
+2. "explanation_text": The exact corresponding spoken explanation from the provided text. The explanation_text across all slides should piece together the entire original text or a very cohesive version of it.
+
+Return ONLY a valid JSON array of objects with keys "slide_text" and "explanation_text".
+Ensure it is strictly valid JSON without markdown wrapping (like \`\`\`json).
+
+Text:
+${text}
+`;
+
+    let slidesJsonStr = '';
+
+    if (aiProvider === 'groq') {
+      const groq = getNextGroqClient();
+      const model = aiModel || 'llama-3.3-70b-versatile';
+      const completion = await groq.chat.completions.create({
+        messages: [{ role: 'user', content: prompt }],
+        model: model,
       });
-    });
+      slidesJsonStr = completion.choices[0]?.message?.content || '[]';
+    } else {
+      const modelName = aiModel || 'gemini-2.5-flash';
+      const currentModel = getNextGeminiModel(modelName);
+      const result = await currentModel.generateContent(prompt);
+      slidesJsonStr = await result.response.text();
+    }
 
-    let duration;
+    // Clean potential markdown blocks
+    slidesJsonStr = slidesJsonStr.replace(/^```json/m, '').replace(/^```/m, '').trim();
+
+    let slides;
     try {
-      duration = await getAudioDuration();
+      slides = JSON.parse(slidesJsonStr);
     } catch (err) {
-      console.error("Could not read audio duration", err);
-      return res.status(500).json({ error: 'Could not process audio track' });
+      console.error("Failed to parse AI slide generation:", err);
+      // Fallback: single slide
+      slides = [{
+        slide_text: text.substring(0, 100) + '...',
+        explanation_text: text
+      }];
     }
 
-    // 2. Clean Text and Split into chunks
-    // Remove markdown bolding and headings to prevent ugly rendering
-    const cleanText = text.replace(/\*\*/g, '').replace(/#/g, '').trim();
-
-    // Try to split by sentence/newline chunks to avoid cutting sentences midway
-    const sentences = cleanText.split(/(?<=[.?!])\s+|\n+/);
-    const slides = [];
-    let currentSlide = '';
-    const IDEAL_CHARS_PER_SLIDE = 250;
-
-    for (const sentence of sentences) {
-      if (!sentence.trim()) continue;
-
-      if ((currentSlide.length + sentence.length) > IDEAL_CHARS_PER_SLIDE && currentSlide.length > 0) {
-        slides.push(currentSlide.trim());
-        currentSlide = sentence + ' ';
-      } else {
-        currentSlide += sentence + ' ';
-      }
-    }
-    if (currentSlide.trim()) {
-      slides.push(currentSlide.trim());
+    if (!Array.isArray(slides) || slides.length === 0) {
+      return res.status(500).json({ error: 'Failed to generate slides' });
     }
 
-    // Calculate total character count to allocate duration proportionally
-    const totalChars = slides.reduce((sum, slide) => sum + slide.length, 0);
-
-    // 3. Generate slide images
-    const slidePaths = [];
-    const listFilePath = path.join(videoDir, `${uuidv4()}_list.txt`);
-    let listContent = '';
+    // 2. Generate audio and image for each slide
+    let videoListContent = '';
+    let audioListContent = '';
 
     for (let i = 0; i < slides.length; i++) {
-      const slideText = slides[i];
+      const slide = slides[i];
+      const explanationText = slide.explanation_text || ' ';
+      const slideText = slide.slide_text || ' ';
+
+      // Generate Audio
+      const slideAudioFilename = `${uuidv4()}_slide.mp3`;
+      const slideAudioFilePath = path.join(audioDir, slideAudioFilename);
+
+      const lang = language || 'en';
+
+      await new Promise((resolve, reject) => {
+        const { spawn } = require('child_process');
+        const child = spawn('node', ['generateAudioChild.js', explanationText, lang, slideAudioFilePath], { cwd: __dirname });
+        child.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error('Audio generation failed'));
+        });
+        child.on('error', reject);
+      });
+
+      audioPaths.push(slideAudioFilePath);
+      audioListContent += `file '${slideAudioFilePath.replace(/\\/g, '/')}'\n`;
+
+      // Get Audio Duration
+      const getAudioDuration = () => new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(slideAudioFilePath, (err, metadata) => {
+          if (err) reject(err);
+          else resolve(metadata.format.duration);
+        });
+      });
+
+      let duration = await getAudioDuration();
+      if (duration < 1.0) duration = 1.0;
+
+      // Generate Image
       const canvas = createCanvas(1280, 720);
       const ctx = canvas.getContext('2d');
 
@@ -363,7 +403,7 @@ app.post('/api/generate-video', async (req, res) => {
         }
         const slideWords = p.trim().split(' ');
         let lineText = '';
-        lines++; // start first line of paragraph
+        lines++;
         for (let n = 0; n < slideWords.length; n++) {
           let testLine = lineText + slideWords[n] + ' ';
           let testWidth = ctx.measureText(testLine).width;
@@ -379,61 +419,73 @@ app.post('/api/generate-video', async (req, res) => {
       const lineHeight = 50;
       const totalHeight = lines * lineHeight;
       let startY = (720 - totalHeight) / 2;
-      // Adjust startY if it overflows top to at least have some padding
       if (startY < 50) startY = 50;
 
       ctx.textAlign = 'center';
       wrapText(ctx, slideText, 640, startY, maxWidth, lineHeight);
 
-      // Save slide to disk
-      const slideFilename = `${uuidv4()}_slide.jpg`;
-      const slideFilePath = path.join(videoDir, slideFilename);
+      const slideImageFilename = `${uuidv4()}_slide.jpg`;
+      const slideImageFilePath = path.join(videoDir, slideImageFilename);
       const buffer = canvas.toBuffer('image/jpeg');
-      fs.writeFileSync(slideFilePath, buffer);
+      fs.writeFileSync(slideImageFilePath, buffer);
 
-      slidePaths.push(slideFilePath);
+      slidePaths.push(slideImageFilePath);
 
-      // Append to ffmpeg concat list file format
-      // Proportional duration based on slide character length
-      let slideDuration = duration * (slideText.length / totalChars);
-      if (slideDuration < 1.5) slideDuration = 1.5; // guarantee minimum 1.5s reading time
-
-      listContent += `file '${slideFilePath.replace(/\\/g, '/')}'\n`;
-      listContent += `duration ${slideDuration.toFixed(2)}\n`;
+      videoListContent += `file '${slideImageFilePath.replace(/\\/g, '/')}'\n`;
+      videoListContent += `duration ${duration.toFixed(2)}\n`;
     }
 
-    // FFmpeg requires the last file to be repeated without duration
-    listContent += `file '${slidePaths[slidePaths.length - 1].replace(/\\/g, '/')}'\n`;
+    videoListContent += `file '${slidePaths[slidePaths.length - 1].replace(/\\/g, '/')}'\n`;
 
-    fs.writeFileSync(listFilePath, listContent);
+    fs.writeFileSync(videoListFilePath, videoListContent);
+    fs.writeFileSync(audioListFilePath, audioListContent);
 
-    // 4. Generate video by combining slides and audio
-    ffmpeg()
-      .input(listFilePath)
-      .inputOptions(['-f concat', '-safe 0'])
-      .input(audioFilePath)
-      .videoCodec('libx264')
-      .audioCodec('aac')
-      .outputOptions([
-        '-pix_fmt', 'yuv420p',
-        '-shortest'
-      ])
-      .save(videoFilePath)
-      .on('end', () => {
-        // Cleanup all temporary slide images and list file
-        slidePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
-        try { fs.unlinkSync(listFilePath); } catch (e) {}
+    // 3. Combine Audio Files first
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(audioListFilePath)
+        .inputOptions(['-f concat', '-safe 0'])
+        .outputOptions(['-c copy'])
+        .save(combinedAudioFilePath)
+        .on('end', resolve)
+        .on('error', reject);
+    });
 
-        res.json({ videoUrl: `/api/video/${videoFilename}` });
-      })
-      .on('error', (err) => {
-        console.error('Error generating video:', err);
-        slidePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
-        try { fs.unlinkSync(listFilePath); } catch (e) {}
-        res.status(500).json({ error: 'Failed to generate video' });
-      });
+    // 4. Generate final video using concat images and combined audio
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(videoListFilePath)
+        .inputOptions(['-f concat', '-safe 0'])
+        .input(combinedAudioFilePath)
+        .videoCodec('libx264')
+        .audioCodec('aac')
+        .outputOptions([
+          '-pix_fmt', 'yuv420p',
+          '-shortest'
+        ])
+        .save(videoFilePath)
+        .on('end', resolve)
+        .on('error', reject);
+    });
+
+    // Cleanup
+    slidePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    audioPaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    try { fs.unlinkSync(videoListFilePath); } catch (e) {}
+    try { fs.unlinkSync(audioListFilePath); } catch (e) {}
+
+    res.json({
+      videoUrl: `/api/video/${videoFilename}`,
+      audioUrl: `/api/audio/${combinedAudioFilename}` // return the combined audio too!
+    });
+
   } catch (error) {
     console.error('Error in video generation process:', error);
+    // Cleanup on error
+    slidePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    audioPaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    try { fs.unlinkSync(videoListFilePath); } catch (e) {}
+    try { fs.unlinkSync(audioListFilePath); } catch (e) {}
     res.status(500).json({ error: 'Failed to process video generation' });
   }
 });
