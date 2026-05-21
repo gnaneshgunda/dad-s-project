@@ -344,14 +344,53 @@ app.post('/api/generate-video', async (req, res) => {
 
   try {
     // 1. Generate JSON slides from the text
-    const prompt = `You are an expert educator and presentation creator. The user has provided a topic or text. Your task is to create a complete, highly engaging educational presentation about it.
+  const prompt = `
+You are an excellent university professor creating educational lecture slides for students.
 
-For each logical slide in the presentation, provide:
-1. "slide_content": The visual content for the slide. It MUST include a short, catchy TITLE on the first line, followed by an empty line, and then a series of concise, informative bullet points. Use plain text dashes "-" for bullet points. Do NOT use markdown bolding or asterisks. Provide enough bullet points to adequately cover the slide's topic without overwhelming the screen.
-2. "explanation_content": A rich, detailed spoken explanation that a teacher would say out loud while showing this slide. It should not just read the bullet points, but expand on them, provide context, analogies, and a cohesive narrative. The explanations across all slides should piece together into a continuous, excellent teaching session.
+The goal is to create slides that genuinely TEACH concepts, similar to real classroom lecture slides used by professors.
 
-Return ONLY a valid JSON array of objects with keys "slide_content" and "explanation_content".
-Ensure it is strictly valid JSON without markdown wrapping (like \`\`\`json).
+For each slide generate:
+
+1. "slide_content"
+- Create informative and educational slide content.
+- Slides may contain:
+  - concise explanations
+  - bullet points
+  - short paragraphs
+  - formulas
+  - examples
+  - definitions
+- The slide itself should already help a student understand the topic even without narration.
+- However, avoid making slides excessively crowded or unreadable.
+- Structure the content clearly and naturally.
+- Use line breaks appropriately.
+- Prefer teaching clarity over presentation aesthetics.
+
+2. "explanation_content"
+- This is the spoken lecture narration.
+- Expand naturally on the slide content like a professor teaching in class.
+- Provide deeper intuition, reasoning, examples, analogies, step-by-step explanations, and context.
+- Do NOT simply read the slide text.
+- Add value beyond what is already written on the slide.
+- Make the narration engaging and educational.
+
+IMPORTANT:
+- Slides should feel like real educational lecture slides.
+- Maintain logical flow between slides.
+- Each slide should continue naturally from the previous one.
+- explanation_content should be more detailed than slide_content.
+- Return ONLY valid JSON.
+- Do NOT include markdown formatting.
+- Escape all special characters properly.
+
+Return format:
+
+[
+  {
+    "slide_content": "Slide title\\n\\nExplanation points here...",
+    "explanation_content": "Detailed spoken explanation..."
+  }
+]
 
 User Topic/Text:
 ${text}
