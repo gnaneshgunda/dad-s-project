@@ -344,15 +344,16 @@ app.post('/api/generate-video', async (req, res) => {
 
   try {
     // 1. Generate JSON slides from the text
-    const prompt = `You are a video presentation assistant. Given the following detailed text, break it down into logical presentation slides.
-For each slide, provide:
-1. "slide_content": A presentation slide format. It MUST include a short TITLE on the first line, followed by an empty line, and then a series of concise bullet points summarizing the explanation. Provide enough bullet points to adequately summarize the current explanation. Use plain text dashes "-" for bullet points. Do NOT use markdown bolding or asterisks. Make sure the text is readable but can contain enough information.
-2. "explanation_content": The exact corresponding spoken explanation from the provided text. The explanation_content across all slides should piece together the entire original text or a very cohesive version of it.
+    const prompt = `You are an expert educator and presentation creator. The user has provided a topic or text. Your task is to create a complete, highly engaging educational presentation about it.
+
+For each logical slide in the presentation, provide:
+1. "slide_content": The visual content for the slide. It MUST include a short, catchy TITLE on the first line, followed by an empty line, and then a series of concise, informative bullet points. Use plain text dashes "-" for bullet points. Do NOT use markdown bolding or asterisks. Provide enough bullet points to adequately cover the slide's topic without overwhelming the screen.
+2. "explanation_content": A rich, detailed spoken explanation that a teacher would say out loud while showing this slide. It should not just read the bullet points, but expand on them, provide context, analogies, and a cohesive narrative. The explanations across all slides should piece together into a continuous, excellent teaching session.
 
 Return ONLY a valid JSON array of objects with keys "slide_content" and "explanation_content".
 Ensure it is strictly valid JSON without markdown wrapping (like \`\`\`json).
 
-Text:
+User Topic/Text:
 ${text}
 `;
 
