@@ -234,17 +234,20 @@ app.post('/api/generate-audio', (req, res) => {
   }
 });
 
-// Helper to wrap text for canvas, honoring newlines
-function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+// Helper to compute height and potentially auto-scale font
+function getWrappedLines(ctx, text, maxWidth, baseFont, boldFont) {
   const paragraphs = text.split('\n');
-  let currentY = y;
+  const resultLines = [];
 
   for (let i = 0; i < paragraphs.length; i++) {
     const p = paragraphs[i].trim();
     if (!p) {
-      currentY += lineHeight; // Empty line for paragraph break
+      resultLines.push({ text: '', isTitle: false });
       continue;
     }
+
+    const isTitle = (i === 0);
+    ctx.font = isTitle ? boldFont : baseFont;
 
     const words = p.split(' ');
     let line = '';
@@ -253,17 +256,67 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
       let testLine = line + words[n] + ' ';
       let testWidth = ctx.measureText(testLine).width;
       if (testWidth > maxWidth && n > 0) {
-        ctx.fillText(line.trim(), x, currentY);
+        resultLines.push({ text: line.trim(), isTitle });
         line = words[n] + ' ';
-        currentY += lineHeight;
       }
       else {
         line = testLine;
       }
     }
-    ctx.fillText(line.trim(), x, currentY);
-    currentY += lineHeight;
+    resultLines.push({ text: line.trim(), isTitle });
   }
+  return resultLines;
+}
+
+// Helper to wrap text for canvas, honoring newlines and auto-fitting height
+function wrapText(ctx, text, x, startYOriginal, maxWidth, baseLineHeight) {
+  let fontSize = 36;
+  let boldFontSize = 48;
+  let lineHeight = baseLineHeight;
+  let lines = [];
+  let totalHeight = 0;
+
+  // Try to fit the text within 620px of height (720 max - padding)
+  const MAX_HEIGHT = 620;
+
+  while (fontSize >= 18) {
+    ctx.font = `${fontSize}px sans-serif`;
+    lines = getWrappedLines(ctx, text, maxWidth, `${fontSize}px sans-serif`, `bold ${boldFontSize}px sans-serif`);
+
+    totalHeight = 0;
+    for (const line of lines) {
+       totalHeight += line.isTitle ? (lineHeight * (boldFontSize/fontSize)) : lineHeight;
+    }
+
+    if (totalHeight <= MAX_HEIGHT) {
+      break;
+    }
+
+    // Reduce font sizes and try again
+    fontSize -= 2;
+    boldFontSize -= 2.66; // Maintain ratio
+    lineHeight = fontSize * 1.4; // roughly 1.4em line height
+  }
+
+  let currentY = (720 - totalHeight) / 2;
+  if (currentY < 50) currentY = 50;
+
+  for (const line of lines) {
+    if (!line.text) {
+      currentY += lineHeight;
+      continue;
+    }
+
+    if (line.isTitle) {
+      ctx.font = `bold ${boldFontSize}px sans-serif`;
+    } else {
+      ctx.font = `${fontSize}px sans-serif`;
+    }
+
+    ctx.fillText(line.text, x, currentY);
+    currentY += line.isTitle ? (lineHeight * (boldFontSize/fontSize)) : lineHeight;
+  }
+
   return currentY;
 }
 
@@ -293,10 +346,10 @@ app.post('/api/generate-video', async (req, res) => {
     // 1. Generate JSON slides from the text
     const prompt = `You are a video presentation assistant. Given the following detailed text, break it down into logical presentation slides.
 For each slide, provide:
-1. "slide_text": A concise summary or bullet points suitable for a visual slide (max 150 characters). Do not use markdown bolding or complex formatting.
-2. "explanation_text": The exact corresponding spoken explanation from the provided text. The explanation_text across all slides should piece together the entire original text or a very cohesive version of it.
+1. "slide_content": A presentation slide format. It MUST include a short TITLE on the first line, followed by an empty line, and then a series of concise bullet points summarizing the explanation. Provide enough bullet points to adequately summarize the current explanation. Use plain text dashes "-" for bullet points. Do NOT use markdown bolding or asterisks. Make sure the text is readable but can contain enough information.
+2. "explanation_content": The exact corresponding spoken explanation from the provided text. The explanation_content across all slides should piece together the entire original text or a very cohesive version of it.
 
-Return ONLY a valid JSON array of objects with keys "slide_text" and "explanation_text".
+Return ONLY a valid JSON array of objects with keys "slide_content" and "explanation_content".
 Ensure it is strictly valid JSON without markdown wrapping (like \`\`\`json).
 
 Text:
@@ -321,7 +374,7 @@ ${text}
     }
 
     // Clean potential markdown blocks
-    slidesJsonStr = slidesJsonStr.replace(/^```json/m, '').replace(/^```/m, '').trim();
+    slidesJsonStr = slidesJsonStr.replace(/```json/gi, '').replace(/```/g, '').trim();
 
     let slides;
     try {
@@ -330,8 +383,8 @@ ${text}
       console.error("Failed to parse AI slide generation:", err);
       // Fallback: single slide
       slides = [{
-        slide_text: text.substring(0, 100) + '...',
-        explanation_text: text
+        slide_content: text.substring(0, 100) + '...',
+        explanation_content: text
       }];
     }
 
@@ -342,11 +395,12 @@ ${text}
     // 2. Generate audio and image for each slide
     let videoListContent = '';
     let audioListContent = '';
+    let totalAudioDuration = 0;
 
     for (let i = 0; i < slides.length; i++) {
       const slide = slides[i];
-      const explanationText = slide.explanation_text || ' ';
-      const slideText = slide.slide_text || ' ';
+      const explanationText = slide.explanation_content || slide.explanation_text || ' ';
+      const slideText = slide.slide_content || slide.slide_text || ' ';
 
       // Generate Audio
       const slideAudioFilename = `${uuidv4()}_slide.mp3`;
@@ -377,6 +431,7 @@ ${text}
 
       let duration = await getAudioDuration();
       if (duration < 1.0) duration = 1.0;
+      totalAudioDuration += duration;
 
       // Generate Image
       const canvas = createCanvas(1280, 720);
@@ -388,41 +443,14 @@ ${text}
 
       // Text styling
       ctx.fillStyle = '#ffffff';
-      ctx.font = '36px sans-serif';
-      ctx.textAlign = 'center';
+      ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
 
-      // Wrap text logic to compute height
-      const paragraphs = slideText.split('\n');
-      let lines = 0;
       const maxWidth = 1000;
-      for (const p of paragraphs) {
-        if (!p.trim()) {
-          lines++;
-          continue;
-        }
-        const slideWords = p.trim().split(' ');
-        let lineText = '';
-        lines++;
-        for (let n = 0; n < slideWords.length; n++) {
-          let testLine = lineText + slideWords[n] + ' ';
-          let testWidth = ctx.measureText(testLine).width;
-          if (testWidth > maxWidth && n > 0) {
-            lines++;
-            lineText = slideWords[n] + ' ';
-          } else {
-            lineText = testLine;
-          }
-        }
-      }
+      const baseLineHeight = 50;
 
-      const lineHeight = 50;
-      const totalHeight = lines * lineHeight;
-      let startY = (720 - totalHeight) / 2;
-      if (startY < 50) startY = 50;
-
-      ctx.textAlign = 'center';
-      wrapText(ctx, slideText, 640, startY, maxWidth, lineHeight);
+      // Draw text left-aligned with a left margin of 140 and auto-fit font
+      wrapText(ctx, slideText, 140, 0, maxWidth, baseLineHeight);
 
       const slideImageFilename = `${uuidv4()}_slide.jpg`;
       const slideImageFilePath = path.join(videoDir, slideImageFilename);
@@ -445,7 +473,7 @@ ${text}
       ffmpeg()
         .input(audioListFilePath)
         .inputOptions(['-f concat', '-safe 0'])
-        .outputOptions(['-c copy'])
+        .outputOptions(['-c:a libmp3lame']) // Re-encode to fix padding/duration issues in concat
         .save(combinedAudioFilePath)
         .on('end', resolve)
         .on('error', reject);
@@ -461,7 +489,7 @@ ${text}
         .audioCodec('aac')
         .outputOptions([
           '-pix_fmt', 'yuv420p',
-          '-shortest'
+          `-t ${totalAudioDuration.toFixed(2)}` // Explicitly stop exactly when audio sum finishes
         ])
         .save(videoFilePath)
         .on('end', resolve)
