@@ -37,7 +37,8 @@ export default function Profile() {
     setSavingName(true);
     try {
       const res = await api.put('/api/profile', { name });
-      setProfile((prev) => ({ ...prev, user: res.data }));
+      const updatedUser = res.data;
+      setProfile((prev) => ({ ...prev, user: { ...prev.user, ...updatedUser, name: updatedUser.name ?? name } }));
       setToast({ message: 'Profile updated!', type: 'success' });
     } catch {
       setToast({ message: 'Failed to update profile', type: 'error' });
