@@ -338,14 +338,9 @@ app.post('/api/generate-video', authMiddleware, async (req, res) => {
 // Endpoint 3: Serve audio file
 app.get('/api/audio/:filename', (req, res) => {
   const { filename } = req.params;
-
   res.sendFile(filename, { root: audioDir }, (err) => {
-    if (err) {
-      if (err.status !== 404) {
-        console.error('Error serving file:', err);
-      }
-
-      res.status(err.status || 500).end();
+    if (err && err.code !== 'EPIPE' && err.code !== 'ECONNABORTED' && err.status !== 404) {
+      console.error('Error serving file:', err);
     }
   });
 });
@@ -353,13 +348,9 @@ app.get('/api/audio/:filename', (req, res) => {
 // Endpoint 4: Serve video file
 app.get('/api/video/:filename', (req, res) => {
   const { filename } = req.params;
-
   res.sendFile(filename, { root: videoDir }, (err) => {
-    if (err) {
-      if (err.status !== 404) {
-        console.error('Error serving file:', err);
-      }
-      res.status(err.status || 500).end();
+    if (err && err.code !== 'EPIPE' && err.code !== 'ECONNABORTED' && err.status !== 404) {
+      console.error('Error serving file:', err);
     }
   });
 });

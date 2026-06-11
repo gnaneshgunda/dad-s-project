@@ -125,7 +125,28 @@ function parseSlideGenerationResponse(rawText) {
   if (start !== -1 && end !== -1) {
     cleaned = cleaned.slice(start, end + 1);
   }
-  return JSON.parse(cleaned);
+
+  // Try full parse first
+  try {
+    return JSON.parse(cleaned);
+  } catch (_) {}
+
+  // JSON was truncated — find the last complete slide object and close the array/object
+  const slidesStart = cleaned.indexOf('"slides"');
+  if (slidesStart === -1) throw new Error('No slides key found in response');
+
+  const arrStart = cleaned.indexOf('[', slidesStart);
+  if (arrStart === -1) throw new Error('No slides array found');
+
+  // Walk backwards from the truncation point to find the last complete slide (ends with })
+  let i = cleaned.length - 1;
+  while (i > arrStart && cleaned[i] !== '}') i--;
+
+  if (i <= arrStart) throw new Error('No complete slide found in truncated response');
+
+  // Rebuild: take everything up to and including the last complete }, close the array and object
+  const recovered = cleaned.slice(0, i + 1) + '],' + '"interactive_quizzes":[]}';
+  return JSON.parse(recovered);
 }
 
 module.exports = {

@@ -1,4 +1,27 @@
-const { createCanvas } = require('canvas');
+const { createCanvas, registerFont } = require('canvas');
+
+// Register Indic script fonts so node-canvas can render them
+const FONT_REGISTRATIONS = [
+  { path: '/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf', family: 'Noto Sans Telugu', weight: 'normal' },
+  { path: '/usr/share/fonts/truetype/noto/NotoSansTelugu-Bold.ttf',    family: 'Noto Sans Telugu', weight: 'bold' },
+  { path: '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf', family: 'Noto Sans Devanagari', weight: 'normal' },
+  { path: '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf',    family: 'Noto Sans Devanagari', weight: 'bold' },
+];
+for (const f of FONT_REGISTRATIONS) {
+  try { registerFont(f.path, { family: f.family, weight: f.weight }); } catch { /* font not present on this system */ }
+}
+
+// Map voice/language codes to the font family that can render their script
+const SCRIPT_FONT = {
+  te: 'Noto Sans Telugu',
+  hi: 'Noto Sans Devanagari',
+  mr: 'Noto Sans Devanagari',
+};
+
+function getFontFamily(language) {
+  const code = (language || 'en').toLowerCase().split('-')[0];
+  return SCRIPT_FONT[code] || '"Segoe UI", Arial, sans-serif';
+}
 
 const FRAME_W = 960;
 const FRAME_H = 540;
@@ -102,7 +125,7 @@ function drawCard(ctx, x, y, w, h) {
   ctx.restore();
 }
 
-function wrapLines(ctx, text, maxWidth, titleSize, bodySize) {
+function wrapLines(ctx, text, maxWidth, titleSize, bodySize, fontFamily) {
   const paragraphs = String(text || '').split('\n');
   const lines = [];
 
@@ -115,7 +138,7 @@ function wrapLines(ctx, text, maxWidth, titleSize, bodySize) {
 
     const isTitle = pIndex === 0;
     const fontSize = isTitle ? titleSize : bodySize;
-    ctx.font = isTitle ? `bold ${fontSize}px "Segoe UI", sans-serif` : `${fontSize}px "Segoe UI", sans-serif`;
+    ctx.font = isTitle ? `bold ${fontSize}px ${fontFamily}` : `${fontSize}px ${fontFamily}`;
 
     const words = trimmed.split(/\s+/);
     let current = '';
@@ -136,31 +159,24 @@ function wrapLines(ctx, text, maxWidth, titleSize, bodySize) {
   return lines;
 }
 
-function fitTextLayout(ctx, text, maxWidth, maxHeight) {
+function fitTextLayout(ctx, text, maxWidth, maxHeight, fontFamily) {
   let titleSize = 44;
   let bodySize = 28;
-  let lineHeight = 1.45;
+  const lineHeight = 1.45;
 
   while (titleSize >= 22) {
-    const lines = wrapLines(ctx, text, maxWidth, titleSize, bodySize);
+    const lines = wrapLines(ctx, text, maxWidth, titleSize, bodySize, fontFamily);
     let totalHeight = 0;
     lines.forEach((line) => {
-      if (line.type === 'spacer') {
-        totalHeight += bodySize * 0.5;
-        return;
-      }
+      if (line.type === 'spacer') { totalHeight += bodySize * 0.5; return; }
       totalHeight += (line.type === 'title' ? titleSize : bodySize) * lineHeight;
     });
-
-    if (totalHeight <= maxHeight) {
-      return { lines, titleSize, bodySize, lineHeight, totalHeight };
-    }
-
+    if (totalHeight <= maxHeight) return { lines, titleSize, bodySize, lineHeight, totalHeight };
     titleSize -= 2;
     bodySize -= 1.5;
   }
 
-  const lines = wrapLines(ctx, text, maxWidth, titleSize, bodySize);
+  const lines = wrapLines(ctx, text, maxWidth, titleSize, bodySize, fontFamily);
   let totalHeight = 0;
   lines.forEach((line) => {
     if (line.type === 'spacer') return;
@@ -169,7 +185,7 @@ function fitTextLayout(ctx, text, maxWidth, maxHeight) {
   return { lines, titleSize, bodySize, lineHeight, totalHeight };
 }
 
-function drawTextBlock(ctx, text, x, y, w, h) {
+function drawTextBlock(ctx, text, x, y, w, h, fontFamily) {
   const padding = 32;
   drawCard(ctx, x, y, w, h);
 
@@ -178,19 +194,13 @@ function drawTextBlock(ctx, text, x, y, w, h) {
   const innerW = w - padding * 2;
   const innerH = h - padding * 2;
 
-  const layout = fitTextLayout(ctx, text, innerW, innerH);
+  const layout = fitTextLayout(ctx, text, innerW, innerH, fontFamily);
   let cursorY = innerY + Math.max(0, (innerH - layout.totalHeight) / 2);
 
   layout.lines.forEach((line) => {
-    if (line.type === 'spacer') {
-      cursorY += layout.bodySize * 0.5;
-      return;
-    }
-
+    if (line.type === 'spacer') { cursorY += layout.bodySize * 0.5; return; }
     const size = line.type === 'title' ? layout.titleSize : layout.bodySize;
-    ctx.font = line.type === 'title'
-      ? `bold ${size}px "Segoe UI", sans-serif`
-      : `${size}px "Segoe UI", sans-serif`;
+    ctx.font = line.type === 'title' ? `bold ${size}px ${fontFamily}` : `${size}px ${fontFamily}`;
     ctx.fillStyle = line.type === 'title' ? '#0f172a' : '#334155';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -220,7 +230,7 @@ function drawImageCover(ctx, image, x, y, w, h, radius = IMAGE_RADIUS) {
   ctx.restore();
 }
 
-function drawLayout(ctx, slide, image) {
+function drawLayout(ctx, slide, image, fontFamily) {
   const layout = slide.layout_type || 'text-left-image-right';
   const contentH = FRAME_H - MARGIN * 2;
 
@@ -229,12 +239,12 @@ function drawLayout(ctx, slide, image) {
       const imageW = Math.floor(FRAME_W * 0.42);
       const textW = FRAME_W - imageW - MARGIN * 3;
       drawImageCover(ctx, image, MARGIN, MARGIN, imageW, contentH);
-      drawTextBlock(ctx, slide.display_text, MARGIN * 2 + imageW, MARGIN, textW, contentH);
+      drawTextBlock(ctx, slide.display_text, MARGIN * 2 + imageW, MARGIN, textW, contentH, fontFamily);
       break;
     }
     case 'split-card': {
       const halfW = (FRAME_W - MARGIN * 3) / 2;
-      drawTextBlock(ctx, slide.display_text, MARGIN, MARGIN, halfW, contentH);
+      drawTextBlock(ctx, slide.display_text, MARGIN, MARGIN, halfW, contentH, fontFamily);
       drawImageCover(ctx, image, MARGIN + halfW + MARGIN, MARGIN, halfW, contentH, CARD_RADIUS);
       break;
     }
@@ -243,37 +253,38 @@ function drawLayout(ctx, slide, image) {
       const textH = contentH - heroH - 24;
       const heroW = FRAME_W - MARGIN * 2;
       drawImageCover(ctx, image, MARGIN, MARGIN, heroW, heroH, CARD_RADIUS);
-      drawTextBlock(ctx, slide.display_text, MARGIN, MARGIN + heroH + 24, heroW, textH);
+      drawTextBlock(ctx, slide.display_text, MARGIN, MARGIN + heroH + 24, heroW, textH, fontFamily);
       break;
     }
     case 'full-text': {
-      drawTextBlock(ctx, slide.display_text, MARGIN, MARGIN, FRAME_W - MARGIN * 2, contentH);
+      drawTextBlock(ctx, slide.display_text, MARGIN, MARGIN, FRAME_W - MARGIN * 2, contentH, fontFamily);
       break;
     }
     case 'text-left-image-right':
     default: {
       const imageW = Math.floor(FRAME_W * 0.42);
       const textW = FRAME_W - imageW - MARGIN * 3;
-      drawTextBlock(ctx, slide.display_text, MARGIN, MARGIN, textW, contentH);
+      drawTextBlock(ctx, slide.display_text, MARGIN, MARGIN, textW, contentH, fontFamily);
       drawImageCover(ctx, image, MARGIN * 2 + textW, MARGIN, imageW, contentH);
       break;
     }
   }
 }
 
-async function renderSlide(slide, imageResult) {
+async function renderSlide(slide, imageResult, language) {
   const canvas = createCanvas(FRAME_W, FRAME_H);
   const ctx = canvas.getContext('2d');
+  const fontFamily = getFontFamily(language);
 
   drawGradientBackground(ctx, slide.slide_bg_color || '#1e3a5f');
 
   const layout = slide.layout_type || 'text-left-image-right';
   if (layout === 'full-text') {
-    drawTextBlock(ctx, slide.display_text, MARGIN, MARGIN, FRAME_W - MARGIN * 2, FRAME_H - MARGIN * 2);
+    drawTextBlock(ctx, slide.display_text, MARGIN, MARGIN, FRAME_W - MARGIN * 2, FRAME_H - MARGIN * 2, fontFamily);
   } else if (imageResult?.image) {
-    drawLayout(ctx, slide, imageResult.image);
+    drawLayout(ctx, slide, imageResult.image, fontFamily);
   } else {
-    drawTextBlock(ctx, slide.display_text, MARGIN, MARGIN, FRAME_W - MARGIN * 2, FRAME_H - MARGIN * 2);
+    drawTextBlock(ctx, slide.display_text, MARGIN, MARGIN, FRAME_W - MARGIN * 2, FRAME_H - MARGIN * 2, fontFamily);
   }
 
   return canvas.toBuffer('image/jpeg', { quality: 0.82 });

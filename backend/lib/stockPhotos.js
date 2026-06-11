@@ -28,13 +28,16 @@ async function fetchStockImage(keyword) {
     });
 
     const photo = result.photos?.[0];
-    if (!photo) return null;
+    if (!photo) {
+      console.warn(`Pexels: no results for "${keyword}"`);
+      return null;
+    }
 
     const url = photo.src.large2x || photo.src.large || photo.src.original;
     const buffer = await downloadImageBuffer(url);
     return { buffer, attribution: photo.photographer };
   } catch (err) {
-    console.warn('Pexels fetch failed:', err.message);
+    console.warn(`Pexels fetch failed for "${keyword}":`, err.message);
     return null;
   }
 }

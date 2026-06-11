@@ -64,13 +64,17 @@ async function callLlm(prompt, aiProvider, aiModel, getNextGroqClient, getNextGe
     const completion = await groq.chat.completions.create({
       messages: [{ role: 'user', content: prompt }],
       model,
+      max_tokens: 8000,
     });
     return completion.choices[0]?.message?.content || '{}';
   }
 
   const modelName = aiModel || 'gemini-2.5-flash';
   const currentModel = getNextGeminiModel(modelName);
-  const result = await currentModel.generateContent(prompt);
+  const result = await currentModel.generateContent({
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { maxOutputTokens: 8000 },
+  });
   return result.response.text();
 }
 
@@ -151,11 +155,15 @@ async function generateVideo({
       let imageResult = null;
       if (layoutType !== 'full-text') {
         imageResult = await resolveSlideImage(keyword, bgColor);
+        if (!imageResult || imageResult.isFallback) {
+          console.warn(`Slide ${i + 1}: no Pexels image for keyword "${keyword}", using fallback`);
+        }
       }
 
       const slideBuffer = await renderSlide(
         { display_text: displayText, slide_bg_color: bgColor, layout_type: layoutType },
-        imageResult
+        imageResult,
+        language
       );
 
       const slideImageFilename = `${uuidv4()}_slide.jpg`;

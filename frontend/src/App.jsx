@@ -16,7 +16,7 @@ function App() {
     <Router>
       <div className="min-h-screen flex flex-col">
         <Navbar />
-        <main className="flex-1">
+        <main className="flex-1 sm:pb-0 pb-16">
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
