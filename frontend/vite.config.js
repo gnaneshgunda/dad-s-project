@@ -12,4 +12,10 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    port: 4173,
+  },
+  build: {
+    rollupOptions: {},
+  },
 })
