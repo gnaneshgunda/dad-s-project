@@ -14,12 +14,13 @@ const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
+
+dotenv.config();
+
 const db = require('./db/index');
 const authMiddleware = require('./middleware/auth');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
-
-dotenv.config();
 
 const app = express();
 
@@ -90,12 +91,14 @@ app.post('/api/signup', async (req, res) => {
       const token = jwt.sign({ id: user.id, email }, JWT_SECRET, { expiresIn: '7d' });
       res.status(201).json({ token, user: { id: user.id, email } });
     } catch (err) {
+      console.error('Signup create user error:', err);
       if (err.code === 'P2002') {
         return res.status(400).json({ error: 'Email already exists' });
       }
       return res.status(500).json({ error: 'Failed to create user' });
     }
   } catch (error) {
+    console.error('Signup outer error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -597,7 +600,7 @@ app.get('/api/video/:filename', (req, res) => {
 // History Endpoints
 
 // Save to history
-app.post('/api/history', authMiddleware, (req, res) => {
+app.post('/api/history', authMiddleware, async (req, res) => {
   const { title, text, audioUrl, videoUrl } = req.body;
   const userId = req.user.id;
 
@@ -605,49 +608,67 @@ app.post('/api/history', authMiddleware, (req, res) => {
     return res.status(400).json({ error: 'Title or text is required' });
   }
 
-  db.run(
-    'INSERT INTO history (user_id, title, text, audio_url, video_url) VALUES (?, ?, ?, ?, ?)',
-    [userId, title || 'Untitled', text, audioUrl, videoUrl],
-    function(err) {
-      if (err) {
-        console.error('Error saving history:', err);
-        return res.status(500).json({ error: 'Failed to save history' });
-      }
-      res.status(201).json({ id: this.lastID, message: 'Saved to history successfully' });
-    }
-  );
+  try {
+    const historyItem = await db.history.create({
+      data: {
+        userId,
+        title: title || 'Untitled',
+        text,
+        audioUrl,
+        videoUrl,
+      },
+    });
+
+    res.status(201).json(historyItem);
+  } catch (err) {
+    console.error('Error saving history:', err);
+    res.status(500).json({ error: 'Failed to save history' });
+  }
 });
 
 // Update history entry
-app.put('/api/history/:id', authMiddleware, (req, res) => {
+app.put('/api/history/:id', authMiddleware, async (req, res) => {
   const { audioUrl, videoUrl } = req.body;
   const userId = req.user.id;
-  const historyId = req.params.id;
+  const historyId = Number(req.params.id);
 
-  db.run(
-    'UPDATE history SET audio_url = ?, video_url = ? WHERE id = ? AND user_id = ?',
-    [audioUrl, videoUrl, historyId, userId],
-    function(err) {
-      if (err) {
-        console.error('Error updating history:', err);
-        return res.status(500).json({ error: 'Failed to update history' });
-      }
-      res.json({ message: 'History updated successfully' });
+  try {
+    const updated = await db.history.updateMany({
+      where: {
+        id: historyId,
+        userId,
+      },
+      data: {
+        audioUrl,
+        videoUrl,
+      },
+    });
+
+    if (updated.count === 0) {
+      return res.status(404).json({ error: 'History item not found' });
     }
-  );
+
+    res.json({ message: 'History updated successfully' });
+  } catch (err) {
+    console.error('Error updating history:', err);
+    res.status(500).json({ error: 'Failed to update history' });
+  }
 });
 
 // Get user history
-app.get('/api/history', authMiddleware, (req, res) => {
+app.get('/api/history', authMiddleware, async (req, res) => {
   const userId = req.user.id;
 
-  db.all('SELECT * FROM history WHERE user_id = ? ORDER BY created_at DESC', [userId], (err, rows) => {
-    if (err) {
-      console.error('Error fetching history:', err);
-      return res.status(500).json({ error: 'Failed to fetch history' });
-    }
+  try {
+    const rows = await db.history.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
     res.json(rows);
-  });
+  } catch (err) {
+    console.error('Error fetching history:', err);
+    res.status(500).json({ error: 'Failed to fetch history' });
+  }
 });
 
 // Default route
