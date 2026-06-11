@@ -9,33 +9,50 @@ datasource db {
 }
 
 model User {
-  id        Int       @id @default(autoincrement())
-  email     String    @unique
-  password  String
-  name      String?
-  createdAt DateTime  @default(now())
-  subjects  Subject[]
-  history   History[]
+  id             Int             @id @default(autoincrement())
+  email          String          @unique
+  password       String
+  name           String?
+  createdAt      DateTime        @default(now())
+  subjects       Subject[]
+  history        History[]
+  generationJobs GenerationJob[]
 }
 
 model Subject {
-  id        Int       @id @default(autoincrement())
-  name      String
-  userId    Int
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  chapters  Chapter[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id              Int       @id @default(autoincrement())
+  name            String
+  description     String?
+  searchQuery     String?
+  learningScope   String    @default("quick-lesson")
+  isPublic        Boolean   @default(false)
+  curriculumJson  String?   @db.Text
+  sourceSubjectId Int?
+  sourceSubject   Subject?  @relation("SubjectForks", fields: [sourceSubjectId], references: [id])
+  forks           Subject[] @relation("SubjectForks")
+  userId          Int
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chapters        Chapter[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([searchQuery, isPublic])
 }
 
 model Chapter {
-  id        Int       @id @default(autoincrement())
-  name      String
-  subjectId Int
-  subject   Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  videos    Video[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id               Int             @id @default(autoincrement())
+  name             String
+  description      String?
+  topicQuery       String?
+  lessonPlanJson   String?         @db.Text
+  generationStatus String          @default("planned")
+  sortOrder        Int             @default(0)
+  subjectId        Int
+  subject          Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  videos           Video[]
+  generationJobs   GenerationJob[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 }
 
 model Video {
@@ -52,15 +69,30 @@ model Video {
   updatedAt   DateTime @updatedAt
 }
 
-// Legacy history table for backward compatibility, linked to User
+model GenerationJob {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chapterId  Int?
+  chapter    Chapter? @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  subjectId  Int?
+  type       String
+  status     String   @default("pending")
+  progress   String?
+  resultJson String?  @db.Text
+  error      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
 model History {
-  id        Int       @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   title     String?
   text      String?
   audioUrl  String?
   videoUrl  String?
   userId    Int
-  user      User      @relation(fields: [userId], references: [id])
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

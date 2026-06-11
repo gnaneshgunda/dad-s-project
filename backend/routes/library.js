@@ -15,7 +15,7 @@ router.get('/library', authMiddleware, async (req, res) => {
               orderBy: { createdAt: 'desc' },
             },
           },
-          orderBy: { createdAt: 'asc' },
+          orderBy: { sortOrder: 'asc' },
         },
       },
       orderBy: { createdAt: 'asc' },
@@ -87,7 +87,7 @@ router.get('/subjects/:subjectId/chapters', authMiddleware, async (req, res) => 
     const chapters = await db.chapter.findMany({
       where: { subjectId },
       include: { _count: { select: { videos: true } } },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { sortOrder: 'asc' },
     });
     res.json(chapters);
   } catch (err) {

@@ -21,7 +21,9 @@ const libraryRoutes = require('./routes/library');
 const profileRoutes = require('./routes/profile');
 const { resolveEdgeVoice, VOICES } = require('./lib/voices');
 const { generateVideo } = require('./lib/videoGeneration');
+const { createLlmCaller } = require('./lib/llmClient');
 const { getLanguageInstruction } = require('./lib/llmPrompts');
+const initCoursesRouter = require('./routes/courses');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -100,6 +102,10 @@ const videoDir = path.join(__dirname, 'video');
 if (!fs.existsSync(videoDir)) {
   fs.mkdirSync(videoDir);
 }
+
+const callLlm = createLlmCaller(getNextGroqClient, getNextGeminiModel);
+app.use('/api', initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }));
+
 // Authentication Endpoints
 
 app.post('/api/signup', async (req, res) => {
@@ -307,8 +313,7 @@ app.post('/api/generate-video', authMiddleware, async (req, res) => {
       promptType,
       audioDir,
       videoDir,
-      getNextGroqClient,
-      getNextGeminiModel,
+      callLlm,
     });
 
     const video = await db.video.create({

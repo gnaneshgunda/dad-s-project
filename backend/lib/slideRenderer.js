@@ -1,14 +1,17 @@
 const { createCanvas, registerFont } = require('canvas');
+const path = require('path');
 
 // Register Indic script fonts so node-canvas can render them
+const FONTS_DIR = path.join(__dirname, '..', 'assets', 'fonts');
+
 const FONT_REGISTRATIONS = [
-  { path: '/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf', family: 'Noto Sans Telugu', weight: 'normal' },
-  { path: '/usr/share/fonts/truetype/noto/NotoSansTelugu-Bold.ttf',    family: 'Noto Sans Telugu', weight: 'bold' },
-  { path: '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf', family: 'Noto Sans Devanagari', weight: 'normal' },
-  { path: '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf',    family: 'Noto Sans Devanagari', weight: 'bold' },
+  { file: 'NotoSansTelugu-Regular.ttf', family: 'Noto Sans Telugu', weight: 'normal' },
+  { file: 'NotoSansTelugu-Bold.ttf',    family: 'Noto Sans Telugu', weight: 'bold' },
+  { file: 'NotoSansDevanagari-Regular.ttf', family: 'Noto Sans Devanagari', weight: 'normal' },
+  { file: 'NotoSansDevanagari-Bold.ttf',    family: 'Noto Sans Devanagari', weight: 'bold' },
 ];
 for (const f of FONT_REGISTRATIONS) {
-  try { registerFont(f.path, { family: f.family, weight: f.weight }); } catch { /* font not present on this system */ }
+  try { registerFont(path.join(FONTS_DIR, f.file), { family: f.family, weight: f.weight }); } catch { /* ignore */ }
 }
 
 // Map voice/language codes to the font family that can render their script

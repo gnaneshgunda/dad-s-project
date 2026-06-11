@@ -23,16 +23,46 @@ router.get('/profile', authMiddleware, async (req, res) => {
       db.history.count({ where: { userId: req.user.id } }),
     ]);
 
-    const recentVideos = await db.video.findMany({
-      where: { chapter: { subject: { userId: req.user.id } } },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-      select: {
-        id: true,
-        title: true,
-        createdAt: true,
-        chapter: { select: { name: true, subject: { select: { name: true } } } },
-      },
+    const [recentVideos, courses, publicCourses, activeJobs] = await Promise.all([
+      db.video.findMany({
+        where: { chapter: { subject: { userId: req.user.id } } },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          title: true,
+          createdAt: true,
+          chapter: { select: { name: true, subject: { select: { id: true, name: true } } } },
+        },
+      }),
+      db.subject.findMany({
+        where: { userId: req.user.id },
+        include: {
+          chapters: { include: { videos: { take: 1 } } },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 6,
+      }),
+      db.subject.count({ where: { userId: req.user.id, isPublic: true } }),
+      db.generationJob.findMany({
+        where: { userId: req.user.id, status: { in: ['pending', 'running'] } },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      }),
+    ]);
+
+    const courseProgress = courses.map((c) => {
+      const total = c.chapters.length;
+      const completed = c.chapters.filter((ch) => ch.videos.length > 0).length;
+      return {
+        id: c.id,
+        name: c.name,
+        learningScope: c.learningScope,
+        isPublic: c.isPublic,
+        total,
+        completed,
+        percent: total ? Math.round((completed / total) * 100) : 0,
+      };
     });
 
     res.json({
@@ -42,8 +72,11 @@ router.get('/profile', authMiddleware, async (req, res) => {
         chapters: chapterCount,
         videos: videoCount,
         historyItems: historyCount,
+        publicCourses,
       },
       recentVideos,
+      courseProgress,
+      activeJobs,
     });
   } catch (err) {
     console.error('Error fetching profile:', err);

@@ -7,65 +7,243 @@ const NATIVE_SCRIPT_RULES = {
   en: 'Write ALL text in English.',
 };
 
-function getLanguageInstruction(language) {
-  const code = (language || 'en').toLowerCase().split('-')[0];
-  return NATIVE_SCRIPT_RULES[code] || `Write ALL text strictly in the language code "${language}". Use the native script only — never transliteration.`;
-}
-
-// Detect if the topic is broad/complex (e.g. "Learn C", "Python tutorial", "Calculus")
-// vs narrow/specific (e.g. "What is a pointer", "Explain photosynthesis")
-function estimateTopicComplexity(text) {
-  const broadKeywords = [
-    'learn', 'tutorial', 'course', 'complete', 'full', 'introduction to',
-    'intro to', 'basics of', 'fundamentals', 'programming', 'language',
-    'from scratch', 'beginner', 'guide to', 'overview of', 'all about',
-  ];
-  const lower = text.toLowerCase();
-  const isBroad = broadKeywords.some(kw => lower.includes(kw)) || lower.split(' ').length <= 4;
-  return isBroad ? 'broad' : 'narrow';
-}
-
-const MODE_CONFIGS = {
-  'explain-detailed': {
-    label: 'Detailed Explanation',
-    slideCount: { broad: '15-20', narrow: '8-12' },
-    narrationWords: '180-250',
-    displayWords: '80-120',
-    narrationInstruction: `Write a deeply detailed professor-style lecture segment. Open with motivation and real-world relevance. Unpack every concept thoroughly with analogies, concrete examples, and step-by-step reasoning. For programming/math topics, walk through syntax and worked examples in the narration. Anticipate confusion and address it. Bridge into the next slide at the end. This is the most important field — treat it as a standalone lecture segment a student could learn from without any other resource.`,
-    displayInstruction: `Write detailed slide content. Each bullet must be a complete thought with a mini-explanation (1-2 sentences). For code/syntax topics, include actual syntax examples or pseudo-code in the display text. Title on first line, then well-developed points. Never use single-word bullets.`,
-    flowInstruction: `For broad topics (e.g. "Learn C"): dedicate 2-3 slides per major subtopic (e.g. Variables, Loops, Functions, Pointers each get their own deep-dive slides). Cover syntax, examples, common mistakes, and best practices. Do NOT give a 1-slide overview of everything — that teaches nothing. For narrow topics: go deep on every angle of that single concept.`,
-  },
-  'explain-simple': {
-    label: 'Simple (ELI5)',
-    slideCount: { broad: '8-12', narrow: '6-8' },
-    narrationWords: '100-150',
-    displayWords: '40-70',
-    narrationInstruction: `Explain like you're talking to a curious 12-year-old. Use everyday analogies, simple language, and relatable examples. Avoid jargon — if you must use a technical term, immediately explain it in plain words. Keep it warm, encouraging, and fun. One key idea per slide.`,
-    displayInstruction: `Simple, clear slide text. Short sentences. Avoid technical jargon. Use friendly language and relatable comparisons. Title on first line, then 3-5 easy-to-read points.`,
-    flowInstruction: `Build concepts from the most basic foundation upward. Each slide should feel like a natural "aha" moment. Use stories or everyday scenarios to explain abstract ideas. End with a fun real-world application.`,
-  },
-  'summarize': {
-    label: 'Summary',
-    slideCount: { broad: '6-8', narrow: '4-6' },
-    narrationWords: '60-90',
-    displayWords: '30-50',
-    narrationInstruction: `Give a crisp, efficient summary. State the key point of this slide, explain why it matters in 1-2 sentences, and move on. No deep dives — this is a review tool for someone who already knows the topic.`,
-    displayInstruction: `Tight, scannable slide content. Bullet points should be concise key facts or takeaways (1 sentence max each). Title on first line. Prioritize the most important information only.`,
-    flowInstruction: `Cover the essential concepts and nothing else. Each slide = one major idea summarized. End with a "Key Takeaways" slide listing the 5-7 most important points from the entire topic.`,
-  },
+const NARRATION_LENGTH_RANGES = {
+  short: { min: 60, max: 100 },
+  medium: { min: 130, max: 180 },
+  long: { min: 200, max: 260 },
 };
 
-function buildSlideGenerationPrompt(text, language, mode = 'explain-detailed', originalTopic = '') {
-  const languageInstruction = getLanguageInstruction(language);
-  const topicForComplexity = originalTopic.trim() || text;
-  const complexity = estimateTopicComplexity(topicForComplexity);
-  const cfg = MODE_CONFIGS[mode] || MODE_CONFIGS['explain-detailed'];
-  const slideCount = cfg.slideCount[complexity];
+const MODE_LABELS = {
+  'explain-detailed': 'Detailed Explanation',
+  'explain-simple': 'Simple Explanation (ELI5)',
+  summarize: 'Summary',
+};
 
-  return `You are a world-class professor and educational content designer creating a lecture video in "${cfg.label}" style.
-${languageInstruction}
+function getLanguageInstruction(language) {
+  const code = (language || 'en').toLowerCase().split('-')[0];
+  return NATIVE_SCRIPT_RULES[code]
+    || `Write ALL text strictly in the language code "${language}". Use the native script only — never transliteration.`;
+}
+
+function getNarrationWordRange(narrationLength, mode) {
+  const tier = NARRATION_LENGTH_RANGES[narrationLength] || NARRATION_LENGTH_RANGES.medium;
+
+  if (mode === 'summarize') {
+    return NARRATION_LENGTH_RANGES.short;
+  }
+
+  if (mode === 'explain-simple') {
+    return {
+      min: Math.round(tier.min * 0.7),
+      max: Math.round(tier.max * 0.7),
+    };
+  }
+
+  return tier;
+}
+
+function parseJsonObject(rawText, contextLabel) {
+  let cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start !== -1 && end !== -1) {
+    cleaned = cleaned.slice(start, end + 1);
+  }
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (err) {
+    throw new Error(`Failed to parse ${contextLabel}: ${err.message}`);
+  }
+}
+
+function parseBlueprintResponse(rawText) {
+  return parseJsonObject(rawText, 'content blueprint');
+}
+
+function parseSlideGenerationResponse(rawText) {
+  let cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start !== -1 && end !== -1) {
+    cleaned = cleaned.slice(start, end + 1);
+  }
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (_) {
+    // JSON was truncated — recover last complete slide
+    const slidesStart = cleaned.indexOf('"slides"');
+    if (slidesStart === -1) throw new Error('No slides key found in response');
+
+    const arrStart = cleaned.indexOf('[', slidesStart);
+    if (arrStart === -1) throw new Error('No slides array found');
+
+    let i = cleaned.length - 1;
+    while (i > arrStart && cleaned[i] !== '}') i--;
+
+    if (i <= arrStart) throw new Error('No complete slide found in truncated response');
+
+    const recovered = `${cleaned.slice(0, i + 1)}],"interactive_quizzes":[]}`;
+    return JSON.parse(recovered);
+  }
+}
+
+function buildIntentClassifierPrompt(userQuery) {
+  return `You are an expert educational content strategist. Before writing any slides, deeply reason about the user's query and produce a complete content blueprint.
+
+Think through these questions internally before producing output:
+- What is the user actually asking for? (solution? explanation? overview? answer?)
+- What kind of content does this topic naturally decompose into?
+- How many slides does this genuinely need — not too few, not padded?
+- Does visual imagery actually help this content, or is it a distraction?
+- How long should each narration be — a 3-step how-to needs less than a broad survey?
+- What logical arc should the slides follow for maximum understanding?
 
 Return ONLY a valid JSON object (no markdown, no code fences, no commentary) with this exact structure:
+
+{
+  "intent": "short plain-English label describing what this query asks for — freeform, not an enum",
+  "language_code": "detected language of the user query, e.g. te, hi, en",
+  "slide_plan": [
+    {
+      "slide_number": 1,
+      "title": "what this slide covers",
+      "purpose": "one sentence: why this slide exists in the arc",
+      "narration_length": "short | medium | long",
+      "needs_image": false,
+      "image_search_keyword": "",
+      "layout_type": "full-text",
+      "display_style": "bullets"
+    }
+  ],
+  "quiz_plan": [
+    {
+      "pause_after_slide": 1,
+      "question_hint": "one sentence describing what concept to quiz here"
+    }
+  ],
+  "narration_tone": "freeform global tone, e.g. rigorous professor, encouraging coding coach"
+}
+
+FIELD RULES:
+
+narration_length tiers:
+- "short"  = 60-100 words  (simple facts, transitions, summaries)
+- "medium" = 130-180 words (standard concept explanation)
+- "long"   = 200-260 words (complex ideas, worked examples, deep dives)
+
+needs_image:
+- true ONLY if a real photograph or illustration meaningfully aids understanding of THAT slide.
+- false for: code, math, algorithms, dry runs, syntax, logic problems, proofs, any slide where text is the content.
+- true for: real-world objects, places, people, natural phenomena, UI concepts, physical processes.
+
+image_search_keyword:
+- ALWAYS in English. Specific 3-6 word Pexels search phrase.
+- Empty string "" if needs_image is false.
+- Never translate this field.
+
+layout_type:
+- one of: "text-left-image-right", "text-right-image-left", "split-card", "centered-hero", "full-text"
+- must be "full-text" or "split-card" if needs_image is false.
+
+display_style:
+- one of: "bullets", "code-block", "item-card", "numbered-steps", "key-value"
+
+quiz_plan:
+- place quizzes at genuine comprehension checkpoints, not uniformly spaced.
+- let slide count and natural pause points determine quiz count.
+- never place a quiz after the intro slide (index 0) or the final summary slide.
+
+slide_plan:
+- choose the slide count that genuinely fits the topic — do not pad, do not under-cover.
+- slide_number starts at 1.
+
+User Query:
+${userQuery}`;
+}
+
+function buildDisplayStyleRules() {
+  return `DISPLAY TEXT RULES (apply display_style from the plan per slide):
+- "bullets"          → 4-6 complete-sentence bullets (never single words). Title on first line, then bullets.
+- "code-block"       → display_text is primarily code or pseudocode with minimal prose. Use \\n for lines.
+- "item-card"        → title = item name on first line; body = definition + example + significance.
+- "numbered-steps"   → numbered list; each step is an actionable complete sentence.
+- "key-value"        → "Term: explanation" format per line.`;
+}
+
+function buildDynamicSlidePrompt(blueprint, userQuery, mode = 'explain-detailed') {
+  const languageCode = blueprint.language_code || 'en';
+  const languageInstruction = getLanguageInstruction(languageCode);
+  const modeLabel = MODE_LABELS[mode] || MODE_LABELS['explain-detailed'];
+
+  const slidePlanDetails = (blueprint.slide_plan || []).map((slide) => {
+    const range = getNarrationWordRange(slide.narration_length, mode);
+    return `Slide ${slide.slide_number}:
+  - title: ${slide.title}
+  - purpose: ${slide.purpose}
+  - narration_length: ${slide.narration_length} → write ${range.min}-${range.max} words
+  - display_style: ${slide.display_style}
+  - layout_type: ${slide.layout_type} (DO NOT change)
+  - needs_image: ${slide.needs_image} (DO NOT change)
+  - image_search_keyword: "${slide.image_search_keyword || ''}" (copy exactly; English only)`;
+  }).join('\n\n');
+
+  const quizPlanDetails = (blueprint.quiz_plan || []).length > 0
+    ? JSON.stringify(blueprint.quiz_plan, null, 2)
+    : '[]';
+
+  const modeNarrationRules = {
+    'explain-detailed': 'Use the full word-count range for each slide\'s narration_length tier.',
+    'explain-simple': 'Reduce narration by ~30% vs the tier ranges above. Use simpler vocabulary and more analogies.',
+    summarize: 'Use the SHORT tier word count (60-100 words) for EVERY slide regardless of blueprint narration_length.',
+  };
+
+  return `You are an expert slide writer executing a pre-approved content plan. Do NOT deviate from the blueprint.
+
+CONTENT INTENT: ${blueprint.intent || 'educational explanation'}
+GLOBAL NARRATION TONE: ${blueprint.narration_tone || 'clear educational narrator'}
+MODE: ${modeLabel}
+${languageInstruction}
+
+You must produce EXACTLY ${(blueprint.slide_plan || []).length} slides in the same order as the plan.
+Do NOT add, remove, reorder, or merge slides.
+For each slide, honor layout_type, needs_image, and display_style from the plan.
+
+═══════════════════════════════════════
+APPROVED SLIDE PLAN
+═══════════════════════════════════════
+${slidePlanDetails}
+
+═══════════════════════════════════════
+QUIZ PLAN
+═══════════════════════════════════════
+${quizPlanDetails}
+
+NARRATION RULES:
+- ${modeNarrationRules[mode] || modeNarrationRules['explain-detailed']}
+- Apply tone "${blueprint.narration_tone}" consistently across all narration_text fields.
+- narration_text must expand beyond display_text — do not simply read the slide verbatim.
+- Add intuition, examples, and bridges between slides where appropriate.
+
+${buildDisplayStyleRules()}
+
+IMAGE RULES:
+- image_search_keyword: copy from blueprint per slide. ALWAYS English. Empty string "" when needs_image is false.
+- Never translate image_search_keyword.
+
+SLIDE VISUAL RULES:
+- slide_bg_color: hex color forming a cohesive theme across slides (vary slightly per slide).
+- layout_type: must match blueprint exactly for each slide.
+
+QUIZ RULES:
+- Generate interactive_quizzes from quiz_plan.
+- pause_after_slide is 0-based index (slide 1 = index 0).
+- Each quiz: question, 4 options, correct_answer as 0-based index.
+- Questions and options follow the language instruction above.
+
+Return ONLY a valid JSON object (no markdown, no code fences, no commentary):
+
 {
   "slides": [
     {
@@ -73,7 +251,7 @@ Return ONLY a valid JSON object (no markdown, no code fences, no commentary) wit
       "display_text": "...",
       "slide_bg_color": "#1e3a5f",
       "layout_type": "text-left-image-right",
-      "image_search_keyword": "..."
+      "image_search_keyword": "english pexels phrase or empty string"
     }
   ],
   "interactive_quizzes": [
@@ -86,71 +264,85 @@ Return ONLY a valid JSON object (no markdown, no code fences, no commentary) wit
   ]
 }
 
-═══════════════════════════════════════
-MODE: ${cfg.label.toUpperCase()}
-═══════════════════════════════════════
+Escape all special JSON characters properly. Use \\n for line breaks in display_text.
 
-SLIDE COUNT:
-- Generate exactly ${slideCount} slides. This topic is "${complexity === 'broad' ? 'broad/complex' : 'narrow/specific'}" so ${complexity === 'broad' ? 'cover all major subtopics with dedicated slides' : 'go deep on the specific concept'}.
-- Never generate fewer than ${slideCount.split('-')[0]} slides. Fewer slides = less learning.
-
-NARRATION TEXT (${cfg.narrationWords} words per slide):
-${cfg.narrationInstruction}
-
-DISPLAY TEXT (${cfg.displayWords} words per slide):
-${cfg.displayInstruction}
-
-CONTENT FLOW:
-${cfg.flowInstruction}
-
-GENERAL RULES:
-- "slide_bg_color": hex color with a cohesive visual theme. Vary slightly per slide.
-- "layout_type": one of "text-left-image-right", "text-right-image-left", "split-card", "centered-hero", "full-text".
-- "image_search_keyword": ALWAYS in ENGLISH regardless of target language. Specific Pexels stock photo search phrase, 3-6 words (e.g. "C programming code terminal", "binary tree data structure diagram"). Never translate this field.
-- "interactive_quizzes": generate ${mode === 'summarize' ? '2' : '3-4'} quizzes placed at logical checkpoints (not all at the end). Write questions and options in the target language. "correct_answer" is the 0-based index into "options".
-- Escape all special JSON characters properly.
-- Use \\n for line breaks in display_text.
-
-User Topic:
-${text}
-
-${originalTopic && originalTopic !== text ? `Supporting Reference (pre-expanded content — use for depth but do NOT limit yourself to it):
-${originalTopic}` : ''}`;
+User Query (for context):
+${userQuery}`;
 }
 
-function parseSlideGenerationResponse(rawText) {
-  let cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start !== -1 && end !== -1) {
-    cleaned = cleaned.slice(start, end + 1);
-  }
+function buildScopeClassifierPrompt(userQuery) {
+  return `You are an educational content strategist. Classify the user's learning goal.
 
-  // Try full parse first
-  try {
-    return JSON.parse(cleaned);
-  } catch (_) {}
+Return ONLY valid JSON (no markdown):
+{
+  "learning_scope": "quick-lesson | deep-dive | full-course",
+  "reasoning": "one sentence why",
+  "language_code": "detected language e.g. en, te, hi"
+}
 
-  // JSON was truncated — find the last complete slide object and close the array/object
-  const slidesStart = cleaned.indexOf('"slides"');
-  if (slidesStart === -1) throw new Error('No slides key found in response');
+Rules:
+- "quick-lesson": single narrow concept answerable in one 5-12 minute video (e.g. "segment trees", "what is a pointer")
+- "deep-dive": one subtopic needing thorough coverage in one lesson (e.g. "pointers in C", "dynamic programming intro")
+- "full-course": broad mastery goal needing many separate lessons (e.g. "learn C", "Python for beginners", "class 12 physics")
 
-  const arrStart = cleaned.indexOf('[', slidesStart);
-  if (arrStart === -1) throw new Error('No slides array found');
+User Query:
+${userQuery}`;
+}
 
-  // Walk backwards from the truncation point to find the last complete slide (ends with })
-  let i = cleaned.length - 1;
-  while (i > arrStart && cleaned[i] !== '}') i--;
+function buildCurriculumPrompt(userQuery, learningScope = 'full-course') {
+  return `You are a curriculum architect designing a structured learning path.
 
-  if (i <= arrStart) throw new Error('No complete slide found in truncated response');
+The user wants a ${learningScope === 'deep-dive' ? 'thorough deep-dive module' : 'complete multi-lesson course'} on:
+${userQuery}
 
-  // Rebuild: take everything up to and including the last complete }, close the array and object
-  const recovered = cleaned.slice(0, i + 1) + '],' + '"interactive_quizzes":[]}';
-  return JSON.parse(recovered);
+Return ONLY valid JSON (no markdown):
+{
+  "course_title": "clear course title",
+  "description": "2-3 sentence course overview",
+  "language_code": "detected language",
+  "modules": [
+    {
+      "order": 1,
+      "module_title": "module name",
+      "module_description": "what this module covers",
+      "lessons": [
+        {
+          "order": 1,
+          "title": "lesson title",
+          "topic_query": "specific query for this lesson's video generation",
+          "description": "one sentence what student learns"
+        }
+      ]
+    }
+  ]
+}
+
+Rules:
+- ${learningScope === 'full-course' ? '8-16 lessons total across 4-8 modules. Cover ALL major subtopics — do not skip fundamentals.' : '3-6 lessons in 2-3 modules for a deep-dive.'}
+- Each lesson = one generate-able video. Keep topic_query specific and narrow.
+- Logical prerequisite order.
+- Do NOT combine unrelated topics into one lesson.
+
+User Query:
+${userQuery}`;
+}
+
+function parseCurriculumResponse(rawText) {
+  return parseJsonObject(rawText, 'curriculum');
+}
+
+function parseScopeResponse(rawText) {
+  return parseJsonObject(rawText, 'scope classification');
 }
 
 module.exports = {
-  buildSlideGenerationPrompt,
+  buildIntentClassifierPrompt,
+  buildDynamicSlidePrompt,
+  buildScopeClassifierPrompt,
+  buildCurriculumPrompt,
+  parseBlueprintResponse,
   parseSlideGenerationResponse,
+  parseCurriculumResponse,
+  parseScopeResponse,
   getLanguageInstruction,
 };

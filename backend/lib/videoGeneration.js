@@ -3,7 +3,12 @@ const path = require('path');
 const { spawn } = require('child_process');
 const ffmpeg = require('fluent-ffmpeg');
 const { v4: uuidv4 } = require('uuid');
-const { buildSlideGenerationPrompt, parseSlideGenerationResponse } = require('./llmPrompts');
+const {
+  buildIntentClassifierPrompt,
+  buildDynamicSlidePrompt,
+  parseBlueprintResponse,
+  parseSlideGenerationResponse,
+} = require('./llmPrompts');
 const { resolveSlideImage } = require('./stockPhotos');
 const { renderSlide } = require('./slideRenderer');
 const { resolveEdgeVoice } = require('./voices');
@@ -57,27 +62,6 @@ function buildQuizTimestamps(rawQuizzes, slideEndTimes) {
     .sort((a, b) => a.timestamp_seconds - b.timestamp_seconds);
 }
 
-async function callLlm(prompt, aiProvider, aiModel, getNextGroqClient, getNextGeminiModel) {
-  if (aiProvider === 'groq') {
-    const groq = getNextGroqClient();
-    const model = aiModel || 'llama-3.3-70b-versatile';
-    const completion = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
-      model,
-      max_tokens: 8000,
-    });
-    return completion.choices[0]?.message?.content || '{}';
-  }
-
-  const modelName = aiModel || 'gemini-2.5-flash';
-  const currentModel = getNextGeminiModel(modelName);
-  const result = await currentModel.generateContent({
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: 8000 },
-  });
-  return result.response.text();
-}
-
 async function generateVideo({
   text,
   originalTopic,
@@ -87,9 +71,10 @@ async function generateVideo({
   promptType,
   audioDir,
   videoDir,
-  getNextGroqClient,
-  getNextGeminiModel,
+  callLlm,
+  onProgress,
 }) {
+  const report = (step, percent) => { if (onProgress) onProgress(step, percent); };
   const videoFilename = `${uuidv4()}.mp4`;
   const combinedAudioFilename = `${uuidv4()}.mp3`;
   const videoFilePath = path.join(videoDir, videoFilename);
@@ -101,21 +86,61 @@ async function generateVideo({
   const videoListFilePath = path.join(videoDir, `${uuidv4()}_video_list.txt`);
 
   try {
-    const prompt = buildSlideGenerationPrompt(originalTopic || text, language, promptType || 'explain-detailed', text);
-    const rawResponse = await callLlm(prompt, aiProvider, aiModel, getNextGroqClient, getNextGeminiModel);
+    const userQuery = originalTopic || text;
+    const mode = promptType || 'explain-detailed';
+
+    // Stage 1 — Content strategist: produce blueprint
+    console.log('Stage 1: generating content blueprint...');
+    const blueprintPrompt = buildIntentClassifierPrompt(userQuery);
+    report('blueprint', 20);
+    const blueprintRaw = await callLlm(blueprintPrompt, aiProvider, aiModel);
+
+    let blueprint;
+    try {
+      blueprint = parseBlueprintResponse(blueprintRaw);
+      if (!Array.isArray(blueprint.slide_plan) || blueprint.slide_plan.length === 0) {
+        throw new Error('Blueprint missing slide_plan');
+      }
+      console.log(`Stage 1 complete: intent="${blueprint.intent}", ${blueprint.slide_plan.length} slides planned`);
+    } catch (err) {
+      console.error('Stage 1 blueprint parse failed:', err.message);
+      blueprint = {
+        intent: 'explain a topic',
+        language_code: (language || 'en').split('-')[0],
+        slide_plan: [{
+          slide_number: 1,
+          title: userQuery.substring(0, 80),
+          purpose: 'Cover the user topic',
+          narration_length: 'medium',
+          needs_image: false,
+          image_search_keyword: '',
+          layout_type: 'full-text',
+          display_style: 'bullets',
+        }],
+        quiz_plan: [],
+        narration_tone: 'clear educational narrator',
+      };
+    }
+
+    // Stage 2 — Slide writer: execute blueprint
+    console.log('Stage 2: writing slides from blueprint...');
+    const slidePrompt = buildDynamicSlidePrompt(blueprint, userQuery, mode);
+    report('slides', 45);
+    const rawResponse = await callLlm(slidePrompt, aiProvider, aiModel);
 
     let payload;
     try {
       payload = parseSlideGenerationResponse(rawResponse);
+      console.log(`Stage 2 complete: ${payload.slides?.length || 0} slides written`);
     } catch (err) {
-      console.error('Failed to parse AI slide generation:', err);
+      console.error('Stage 2 slide parse failed:', err.message);
       payload = {
         slides: [{
           narration_text: text,
           display_text: text.substring(0, 200),
           slide_bg_color: '#1e3a5f',
           layout_type: 'full-text',
-          image_search_keyword: 'education learning classroom',
+          image_search_keyword: '',
         }],
         interactive_quizzes: [],
       };
@@ -132,13 +157,15 @@ async function generateVideo({
     let totalAudioDuration = 0;
     const slideEndTimes = [];
 
+    report('rendering', 60);
     for (let i = 0; i < slides.length; i++) {
+      report('rendering', 60 + Math.floor((i / slides.length) * 25));
       const slide = slides[i];
       const narrationText = slide.narration_text || slide.explanation_content || ' ';
       const displayText = slide.display_text || slide.slide_content || ' ';
       const bgColor = slide.slide_bg_color || '#1e3a5f';
-      const layoutType = slide.layout_type || 'text-left-image-right';
-      const keyword = slide.image_search_keyword || 'education abstract';
+      const layoutType = slide.layout_type || 'full-text';
+      const keyword = slide.image_search_keyword || '';
 
       const slideAudioFilename = `${uuidv4()}_slide.mp3`;
       const slideAudioFilePath = path.join(audioDir, slideAudioFilename);
@@ -153,7 +180,8 @@ async function generateVideo({
       slideEndTimes.push(totalAudioDuration);
 
       let imageResult = null;
-      if (layoutType !== 'full-text') {
+      const wantsImage = layoutType !== 'full-text' && keyword.trim().length > 0;
+      if (wantsImage) {
         imageResult = await resolveSlideImage(keyword, bgColor);
         if (!imageResult || imageResult.isFallback) {
           console.warn(`Slide ${i + 1}: no Pexels image for keyword "${keyword}", using fallback`);
@@ -224,6 +252,7 @@ async function generateVideo({
       interactiveQuizzes,
       slidesJson: JSON.stringify(slides),
       quizzesJson: JSON.stringify(interactiveQuizzes),
+      blueprintJson: JSON.stringify(blueprint),
     };
   } catch (error) {
     slidePaths.forEach((p) => { try { fs.unlinkSync(p); } catch { /* ignore */ } });
