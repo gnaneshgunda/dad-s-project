@@ -3,7 +3,8 @@ import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
-import History from './pages/History';
+import Library from './pages/Library';
+import Profile from './pages/Profile';
 
 function PrivateRoute({ children }) {
   const token = localStorage.getItem('token');
@@ -13,7 +14,7 @@ function PrivateRoute({ children }) {
 function App() {
   return (
     <Router>
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen flex flex-col">
         <Navbar />
         <main className="flex-1">
           <Routes>
@@ -28,12 +29,24 @@ function App() {
               }
             />
             <Route
-              path="/history"
+              path="/library"
               element={
                 <PrivateRoute>
-                  <History />
+                  <Library />
                 </PrivateRoute>
               }
+            />
+            <Route
+              path="/profile"
+              element={
+                <PrivateRoute>
+                  <Profile />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/history"
+              element={<Navigate to="/library" replace />}
             />
           </Routes>
         </main>

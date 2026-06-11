@@ -3,23 +3,26 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
   id        Int       @id @default(autoincrement())
   email     String    @unique
   password  String
+  name      String?
+  createdAt DateTime  @default(now())
   subjects  Subject[]
-  history   History[] // Keep legacy history if needed, or deprecate
+  history   History[]
 }
 
 model Subject {
   id        Int       @id @default(autoincrement())
   name      String
   userId    Int
-  user      User      @relation(fields: [userId], references: [id])
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   chapters  Chapter[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -29,22 +32,24 @@ model Chapter {
   id        Int       @id @default(autoincrement())
   name      String
   subjectId Int
-  subject   Subject   @relation(fields: [subjectId], references: [id])
+  subject   Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   videos    Video[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 }
 
 model Video {
-  id        Int       @id @default(autoincrement())
-  title     String
-  text      String?   // The original text prompt
-  audioUrl  String?
-  videoUrl  String?
-  chapterId Int
-  chapter   Chapter   @relation(fields: [chapterId], references: [id])
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id          Int      @id @default(autoincrement())
+  title       String
+  text        String?
+  audioUrl    String?
+  videoUrl    String?
+  quizzesJson String?  @db.Text
+  slidesJson  String?  @db.Text
+  chapterId   Int
+  chapter     Chapter  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 // Legacy history table for backward compatibility, linked to User

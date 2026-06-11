@@ -3,10 +3,8 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Groq = require('groq-sdk');
-const gTTS = require('gtts');
 const fs = require('fs');
 const path = require('path');
-const { createCanvas } = require('canvas');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -19,6 +17,11 @@ dotenv.config();
 
 const db = require('./db/index');
 const authMiddleware = require('./middleware/auth');
+const libraryRoutes = require('./routes/library');
+const profileRoutes = require('./routes/profile');
+const { resolveEdgeVoice, VOICES } = require('./lib/voices');
+const { generateVideo } = require('./lib/videoGeneration');
+const { getLanguageInstruction } = require('./lib/llmPrompts');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -28,8 +31,37 @@ const upload = multer({ dest: 'uploads/' });
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 const port = process.env.PORT || 3001;
 
-app.use(cors());
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:4173',
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, true); // allow in dev; tighten in production via FRONTEND_URL
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(express.json());
+
+app.get('/api/health', async (_req, res) => {
+  try {
+    await db.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', database: 'connected' });
+  } catch {
+    res.status(503).json({ status: 'degraded', database: 'disconnected' });
+  }
+});
+app.use('/api', libraryRoutes);
+app.use('/api', profileRoutes);
 
 // Manage multiple API keys for Gemini
 const geminiApiKeys = process.env.GEMINI_API_KEYS ? process.env.GEMINI_API_KEYS.split(',') : (process.env.GEMINI_API_KEY ? [process.env.GEMINI_API_KEY] : []);
@@ -95,6 +127,11 @@ app.post('/api/signup', async (req, res) => {
       if (err.code === 'P2002') {
         return res.status(400).json({ error: 'Email already exists' });
       }
+      if (err.code === 'P1001' || err.code === 'P2022') {
+        return res.status(503).json({
+          error: 'Database is not ready. Run: npx prisma db push — then restart the server.',
+        });
+      }
       return res.status(500).json({ error: 'Failed to create user' });
     }
   } catch (error) {
@@ -126,7 +163,7 @@ app.post('/api/login', async (req, res) => {
 });
 
 // Endpoint 1: Expand text (and handle file uploads)
-app.post('/api/expand-text', upload.single('file'), async (req, res) => {
+app.post('/api/expand-text', authMiddleware, upload.single('file'), async (req, res) => {
   let { text, promptType, language, aiProvider, aiModel } = req.body;
   const file = req.file;
 
@@ -159,9 +196,7 @@ app.post('/api/expand-text', upload.single('file'), async (req, res) => {
       systemInstruction = 'You are an assistant that takes a short text or document content and expands it into a full, detailed, and engaging explanatory text. Do not make it too long, but provide good context and explanation.';
     }
 
-    const languageInstruction = language && language !== 'en'
-      ? ` Please output the final response completely in ${language}.`
-      : ` Please output the final response in English.`;
+    const languageInstruction = getLanguageInstruction(language);
 
     const prompt = `
 ${systemInstruction}${languageInstruction}
@@ -200,7 +235,7 @@ ${contentToExplain}
 });
 
 // Endpoint 2: Generate audio
-app.post('/api/generate-audio', (req, res) => {
+app.post('/api/generate-audio', authMiddleware, (req, res) => {
   const { text, language } = req.body;
 
   if (!text) {
@@ -210,360 +245,90 @@ app.post('/api/generate-audio', (req, res) => {
   }
 
   try {
-    // Determine language, defaults to English
-    const lang = language || 'en';
-    const gtts = new gTTS(text, lang);
-
+    const voice = resolveEdgeVoice(language);
     const filename = `${uuidv4()}.mp3`;
     const filepath = path.join(audioDir, filename);
 
-    // Spawn a child process to generate the audio, so that if the `request` network stream
-    // used internally by `gtts` emits an unhandled error (like ETIMEDOUT), it only crashes
-    // the child process and leaves our main Express server running smoothly.
-
     const { spawn } = require('child_process');
-    const child = spawn('node', ['generateAudioChild.js', text, lang, filepath], { cwd: __dirname });
+    const child = spawn('node', ['generateAudioChild.js', text, voice, filepath], { cwd: __dirname });
 
     child.on('close', (code) => {
       if (code === 0) {
         res.json({ audioUrl: `/api/audio/${filename}` });
       } else {
-        console.error(`gTTS child process exited with code ${code}. Likely a network timeout.`);
-        res.status(500).json({ error: 'Failed to generate audio (Connection Error)' });
+        console.error(`edge-tts child process exited with code ${code}.`);
+        res.status(500).json({ error: 'Failed to generate audio (Edge TTS)' });
       }
     });
 
     child.on('error', (err) => {
-      console.error('Failed to start gTTS child process:', err);
+      console.error('Failed to start edge-tts child process:', err);
       res.status(500).json({ error: 'Failed to generate audio' });
     });
 
   } catch (error) {
-    console.error('Error setting up gTTS:', error);
+    console.error('Error setting up edge-tts:', error);
     res.status(500).json({ error: 'Failed to generate audio' });
   }
 });
 
-// Helper to compute height and potentially auto-scale font
-function getWrappedLines(ctx, text, maxWidth, baseFont, boldFont) {
-  const paragraphs = text.split('\n');
-  const resultLines = [];
-
-  for (let i = 0; i < paragraphs.length; i++) {
-    const p = paragraphs[i].trim();
-    if (!p) {
-      resultLines.push({ text: '', isTitle: false });
-      continue;
-    }
-
-    const isTitle = (i === 0);
-    ctx.font = isTitle ? boldFont : baseFont;
-
-    const words = p.split(' ');
-    let line = '';
-
-    for(let n = 0; n < words.length; n++) {
-      let testLine = line + words[n] + ' ';
-      let testWidth = ctx.measureText(testLine).width;
-      if (testWidth > maxWidth && n > 0) {
-        resultLines.push({ text: line.trim(), isTitle });
-        line = words[n] + ' ';
-      }
-      else {
-        line = testLine;
-      }
-    }
-    resultLines.push({ text: line.trim(), isTitle });
-  }
-  return resultLines;
-}
-
-// Helper to wrap text for canvas, honoring newlines and auto-fitting height
-function wrapText(ctx, text, x, startYOriginal, maxWidth, baseLineHeight) {
-  let fontSize = 36;
-  let boldFontSize = 48;
-  let lineHeight = baseLineHeight;
-  let lines = [];
-  let totalHeight = 0;
-
-  // Try to fit the text within 620px of height (720 max - padding)
-  const MAX_HEIGHT = 620;
-
-  while (fontSize >= 18) {
-    ctx.font = `${fontSize}px sans-serif`;
-    lines = getWrappedLines(ctx, text, maxWidth, `${fontSize}px sans-serif`, `bold ${boldFontSize}px sans-serif`);
-
-    totalHeight = 0;
-    for (const line of lines) {
-       totalHeight += line.isTitle ? (lineHeight * (boldFontSize/fontSize)) : lineHeight;
-    }
-
-    if (totalHeight <= MAX_HEIGHT) {
-      break;
-    }
-
-    // Reduce font sizes and try again
-    fontSize -= 2;
-    boldFontSize -= 2.66; // Maintain ratio
-    lineHeight = fontSize * 1.4; // roughly 1.4em line height
-  }
-
-  let currentY = (720 - totalHeight) / 2;
-  if (currentY < 50) currentY = 50;
-
-  for (const line of lines) {
-    if (!line.text) {
-      currentY += lineHeight;
-      continue;
-    }
-
-    if (line.isTitle) {
-      ctx.font = `bold ${boldFontSize}px sans-serif`;
-    } else {
-      ctx.font = `${fontSize}px sans-serif`;
-    }
-
-    ctx.fillText(line.text, x, currentY);
-    currentY += line.isTitle ? (lineHeight * (boldFontSize/fontSize)) : lineHeight;
-  }
-
-  return currentY;
-}
-
 const ffprobePath = require('ffprobe-static').path;
 ffmpeg.setFfprobePath(ffprobePath);
 
-// Endpoint 2.5: Generate video
-app.post('/api/generate-video', async (req, res) => {
-  const { text, aiProvider, aiModel, language } = req.body;
+app.get('/api/voices', (_req, res) => {
+  res.json(VOICES);
+});
+
+app.post('/api/generate-video', authMiddleware, async (req, res) => {
+  const { text, aiProvider, aiModel, language, chapterId, title } = req.body;
 
   if (!text) {
     return res.status(400).json({ error: 'text is required' });
   }
 
-  const videoFilename = `${uuidv4()}.mp4`;
-  const combinedAudioFilename = `${uuidv4()}.mp3`;
-  const videoFilePath = path.join(videoDir, videoFilename);
-  const combinedAudioFilePath = path.join(audioDir, combinedAudioFilename);
-
-  // We'll store temporary paths to clean them up later
-  const slidePaths = [];
-  const audioPaths = [];
-  const audioListFilePath = path.join(videoDir, `${uuidv4()}_audio_list.txt`);
-  const videoListFilePath = path.join(videoDir, `${uuidv4()}_video_list.txt`);
+  if (!chapterId) {
+    return res.status(400).json({ error: 'chapterId is required — save videos to a chapter folder' });
+  }
 
   try {
-    // 1. Generate JSON slides from the text
-  const prompt = `
-You are an excellent university professor creating educational lecture slides for students.
-
-The goal is to create slides that genuinely TEACH concepts, similar to real classroom lecture slides used by professors.
-
-For each slide generate:
-
-1. "slide_content"
-- Create informative and educational slide content.
-- Slides may contain:
-  - concise explanations
-  - bullet points
-  - short paragraphs
-  - formulas
-  - examples
-  - definitions
-- The slide itself should already help a student understand the topic even without narration.
-- However, avoid making slides excessively crowded or unreadable.
-- Structure the content clearly and naturally.
-- Use line breaks appropriately.
-- Prefer teaching clarity over presentation aesthetics.
-
-2. "explanation_content"
-- This is the spoken lecture narration.
-- Expand naturally on the slide content like a professor teaching in class.
-- Provide deeper intuition, reasoning, examples, analogies, step-by-step explanations, and context.
-- Do NOT simply read the slide text.
-- Add value beyond what is already written on the slide.
-- Make the narration engaging and educational.
-
-IMPORTANT:
-- Slides should feel like real educational lecture slides.
-- Maintain logical flow between slides.
-- Each slide should continue naturally from the previous one.
-- explanation_content should be more detailed than slide_content.
-- Return ONLY valid JSON.
-- Do NOT include markdown formatting.
-- Escape all special characters properly.
-
-Return format:
-
-[
-  {
-    "slide_content": "Slide title\\n\\nExplanation points here...",
-    "explanation_content": "Detailed spoken explanation..."
-  }
-]
-
-User Topic/Text:
-${text}
-`;
-
-    let slidesJsonStr = '';
-
-    if (aiProvider === 'groq') {
-      const groq = getNextGroqClient();
-      const model = aiModel || 'llama-3.3-70b-versatile';
-      const completion = await groq.chat.completions.create({
-        messages: [{ role: 'user', content: prompt }],
-        model: model,
-      });
-      slidesJsonStr = completion.choices[0]?.message?.content || '[]';
-    } else {
-      const modelName = aiModel || 'gemini-2.5-flash';
-      const currentModel = getNextGeminiModel(modelName);
-      const result = await currentModel.generateContent(prompt);
-      slidesJsonStr = await result.response.text();
+    const chapter = await db.chapter.findFirst({
+      where: { id: Number(chapterId), subject: { userId: req.user.id } },
+    });
+    if (!chapter) {
+      return res.status(404).json({ error: 'Chapter not found' });
     }
 
-    // Clean potential markdown blocks
-    slidesJsonStr = slidesJsonStr.replace(/```json/gi, '').replace(/```/g, '').trim();
-
-    let slides;
-    try {
-      slides = JSON.parse(slidesJsonStr);
-    } catch (err) {
-      console.error("Failed to parse AI slide generation:", err);
-      // Fallback: single slide
-      slides = [{
-        slide_content: text.substring(0, 100) + '...',
-        explanation_content: text
-      }];
-    }
-
-    if (!Array.isArray(slides) || slides.length === 0) {
-      return res.status(500).json({ error: 'Failed to generate slides' });
-    }
-
-    // 2. Generate audio and image for each slide
-    let videoListContent = '';
-    let audioListContent = '';
-    let totalAudioDuration = 0;
-
-    for (let i = 0; i < slides.length; i++) {
-      const slide = slides[i];
-      const explanationText = slide.explanation_content || slide.explanation_text || ' ';
-      const slideText = slide.slide_content || slide.slide_text || ' ';
-
-      // Generate Audio
-      const slideAudioFilename = `${uuidv4()}_slide.mp3`;
-      const slideAudioFilePath = path.join(audioDir, slideAudioFilename);
-
-      const lang = language || 'en';
-
-      await new Promise((resolve, reject) => {
-        const { spawn } = require('child_process');
-        const child = spawn('node', ['generateAudioChild.js', explanationText, lang, slideAudioFilePath], { cwd: __dirname });
-        child.on('close', (code) => {
-          if (code === 0) resolve();
-          else reject(new Error('Audio generation failed'));
-        });
-        child.on('error', reject);
-      });
-
-      audioPaths.push(slideAudioFilePath);
-      audioListContent += `file '${slideAudioFilePath.replace(/\\/g, '/')}'\n`;
-
-      // Get Audio Duration
-      const getAudioDuration = () => new Promise((resolve, reject) => {
-        ffmpeg.ffprobe(slideAudioFilePath, (err, metadata) => {
-          if (err) reject(err);
-          else resolve(metadata.format.duration);
-        });
-      });
-
-      let duration = await getAudioDuration();
-      if (duration < 1.0) duration = 1.0;
-      totalAudioDuration += duration;
-
-      // Generate Image
-      const canvas = createCanvas(1280, 720);
-      const ctx = canvas.getContext('2d');
-
-      // Background
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, 1280, 720);
-
-      // Text styling
-      ctx.fillStyle = '#ffffff';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-
-      const maxWidth = 1000;
-      const baseLineHeight = 50;
-
-      // Draw text left-aligned with a left margin of 140 and auto-fit font
-      wrapText(ctx, slideText, 140, 0, maxWidth, baseLineHeight);
-
-      const slideImageFilename = `${uuidv4()}_slide.jpg`;
-      const slideImageFilePath = path.join(videoDir, slideImageFilename);
-      const buffer = canvas.toBuffer('image/jpeg');
-      fs.writeFileSync(slideImageFilePath, buffer);
-
-      slidePaths.push(slideImageFilePath);
-
-      videoListContent += `file '${slideImageFilePath.replace(/\\/g, '/')}'\n`;
-      videoListContent += `duration ${duration.toFixed(2)}\n`;
-    }
-
-    videoListContent += `file '${slidePaths[slidePaths.length - 1].replace(/\\/g, '/')}'\n`;
-
-    fs.writeFileSync(videoListFilePath, videoListContent);
-    fs.writeFileSync(audioListFilePath, audioListContent);
-
-    // 3. Combine Audio Files first
-    await new Promise((resolve, reject) => {
-      ffmpeg()
-        .input(audioListFilePath)
-        .inputOptions(['-f concat', '-safe 0'])
-        .outputOptions(['-c:a libmp3lame']) // Re-encode to fix padding/duration issues in concat
-        .save(combinedAudioFilePath)
-        .on('end', resolve)
-        .on('error', reject);
+    const result = await generateVideo({
+      text,
+      aiProvider,
+      aiModel,
+      language,
+      audioDir,
+      videoDir,
+      getNextGroqClient,
+      getNextGeminiModel,
     });
 
-    // 4. Generate final video using concat images and combined audio
-    await new Promise((resolve, reject) => {
-      ffmpeg()
-        .input(videoListFilePath)
-        .inputOptions(['-f concat', '-safe 0'])
-        .input(combinedAudioFilePath)
-        .videoCodec('libx264')
-        .audioCodec('aac')
-        .outputOptions([
-          '-pix_fmt', 'yuv420p',
-          `-t ${totalAudioDuration.toFixed(2)}` // Explicitly stop exactly when audio sum finishes
-        ])
-        .save(videoFilePath)
-        .on('end', resolve)
-        .on('error', reject);
+    const video = await db.video.create({
+      data: {
+        title: title || text.substring(0, 80) || 'Untitled Video',
+        text,
+        audioUrl: result.audioUrl,
+        videoUrl: result.videoUrl,
+        quizzesJson: result.quizzesJson,
+        slidesJson: result.slidesJson,
+        chapterId: chapter.id,
+      },
     });
-
-    // Cleanup
-    slidePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
-    audioPaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
-    try { fs.unlinkSync(videoListFilePath); } catch (e) {}
-    try { fs.unlinkSync(audioListFilePath); } catch (e) {}
 
     res.json({
-      videoUrl: `/api/video/${videoFilename}`,
-      audioUrl: `/api/audio/${combinedAudioFilename}` // return the combined audio too!
+      videoUrl: result.videoUrl,
+      audioUrl: result.audioUrl,
+      interactiveQuizzes: result.interactiveQuizzes,
+      videoId: video.id,
     });
-
   } catch (error) {
     console.error('Error in video generation process:', error);
-    // Cleanup on error
-    slidePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
-    audioPaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
-    try { fs.unlinkSync(videoListFilePath); } catch (e) {}
-    try { fs.unlinkSync(audioListFilePath); } catch (e) {}
     res.status(500).json({ error: 'Failed to process video generation' });
   }
 });
@@ -676,6 +441,29 @@ app.get('/', (req, res) => {
   res.send('Backend is running!');
 });
 
-app.listen(port, "0.0.0.0",() => {
-  console.log(`Server running on port ${port}`);
-});
+async function startServer() {
+  try {
+    await db.$connect();
+    await db.$queryRaw`SELECT 1`;
+    console.log('Database connected');
+  } catch (err) {
+    console.error('Database connection failed:', err.message);
+    console.error('Run: npx prisma db push');
+  }
+
+  const server = app.listen(port, '0.0.0.0', () => {
+    console.log(`Server running on port ${port}`);
+    console.log('Keep this terminal open while using the app.');
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`Port ${port} is already in use. Run: npx kill-port ${port}`);
+    } else {
+      console.error('Server error:', err.message);
+    }
+    process.exit(1);
+  });
+}
+
+startServer();
