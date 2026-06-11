@@ -76,9 +76,11 @@ async function callLlm(prompt, aiProvider, aiModel, getNextGroqClient, getNextGe
 
 async function generateVideo({
   text,
+  originalTopic,
   aiProvider,
   aiModel,
   language,
+  promptType,
   audioDir,
   videoDir,
   getNextGroqClient,
@@ -95,7 +97,7 @@ async function generateVideo({
   const videoListFilePath = path.join(videoDir, `${uuidv4()}_video_list.txt`);
 
   try {
-    const prompt = buildSlideGenerationPrompt(text, language);
+    const prompt = buildSlideGenerationPrompt(text, language, promptType || 'explain-detailed', originalTopic || text);
     const rawResponse = await callLlm(prompt, aiProvider, aiModel, getNextGroqClient, getNextGeminiModel);
 
     let payload;

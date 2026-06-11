@@ -151,26 +151,26 @@ function InteractiveVideoPlayer({ videoUrl, interactiveQuizzes = [], apiBaseUrl 
         />
 
         {activeQuiz && (
-          <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8 z-10">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full p-6 sm:p-8 animate-in fade-in zoom-in duration-200">
-              <div className="flex items-center gap-2 mb-4">
+          <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-8 z-10">
+            <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-xl max-h-[90vh] overflow-y-auto p-5 sm:p-8">
+              <div className="flex items-center gap-2 mb-3">
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">
                   Quick Check
                 </span>
               </div>
-              <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mb-6 leading-snug">
+              <h3 className="text-base sm:text-xl font-bold text-slate-900 mb-4 leading-snug">
                 {activeQuiz.question}
               </h3>
               {!feedback ? (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {activeQuiz.options.map((option, idx) => (
                     <button
                       key={idx}
                       type="button"
                       onClick={() => handleQuizSubmit(idx)}
-                      className="w-full py-3.5 px-5 text-left border-2 border-slate-100 hover:border-indigo-400 hover:bg-indigo-50 rounded-xl transition-all text-slate-700 font-medium"
+                      className="w-full py-3 px-4 text-left border-2 border-slate-100 hover:border-indigo-400 hover:bg-indigo-50 active:bg-indigo-100 rounded-xl transition-all text-slate-700 text-sm font-medium"
                     >
-                      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-100 text-slate-600 text-sm font-bold mr-3">
+                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 text-slate-600 text-xs font-bold mr-2.5 shrink-0">
                         {String.fromCharCode(65 + idx)}
                       </span>
                       {option}
@@ -178,8 +178,8 @@ function InteractiveVideoPlayer({ videoUrl, interactiveQuizzes = [], apiBaseUrl 
                   ))}
                 </div>
               ) : (
-                <div className="space-y-4">
-                  <div className={`rounded-xl p-4 text-sm font-medium ${
+                <div className="space-y-3">
+                  <div className={`rounded-xl p-3.5 text-sm font-medium ${
                     feedback.isCorrect
                       ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                       : 'bg-rose-50 text-rose-800 border border-rose-200'
@@ -191,7 +191,7 @@ function InteractiveVideoPlayer({ videoUrl, interactiveQuizzes = [], apiBaseUrl 
                   <button
                     type="button"
                     onClick={handleContinue}
-                    className="w-full py-3 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-colors"
+                    className="w-full py-3 px-6 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold rounded-xl transition-colors"
                   >
                     Continue Lesson
                   </button>

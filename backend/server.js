@@ -280,7 +280,7 @@ app.get('/api/voices', (_req, res) => {
 });
 
 app.post('/api/generate-video', authMiddleware, async (req, res) => {
-  const { text, aiProvider, aiModel, language, chapterId, title } = req.body;
+  const { text, aiProvider, aiModel, language, chapterId, title, promptType, originalTopic } = req.body;
 
   if (!text) {
     return res.status(400).json({ error: 'text is required' });
@@ -300,9 +300,11 @@ app.post('/api/generate-video', authMiddleware, async (req, res) => {
 
     const result = await generateVideo({
       text,
+      originalTopic: originalTopic || text,
       aiProvider,
       aiModel,
       language,
+      promptType,
       audioDir,
       videoDir,
       getNextGroqClient,

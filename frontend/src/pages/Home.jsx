@@ -184,9 +184,12 @@ export default function Home() {
       let generatedVideoUrl = '';
       if (outputType === 'video') {
         const videoResponse = await api.post('/api/generate-video', {
-          text: expandedText, aiProvider, aiModel, language: audioLanguage,
+          text: expandedText,
+          originalTopic: inputType === 'text' ? inputText : (selectedFile?.name || ''),
+          aiProvider, aiModel, language: audioLanguage,
           chapterId: Number(selectedChapterId),
           title: inputText.substring(0, 80) || 'Generated Lesson',
+          promptType,
         });
         generatedVideoUrl = videoResponse.data.videoUrl;
         setVideoUrl(generatedVideoUrl);
@@ -271,13 +274,27 @@ export default function Home() {
               </div>
             </div>
           ) : (
-            <label className="flex flex-col items-center justify-center px-6 py-10 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/30 transition-colors">
+            <div
+              className="flex flex-col items-center justify-center px-6 py-10 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/30 transition-colors"
+              onClick={() => document.getElementById('file-upload-input').click()}
+            >
               <Upload className="h-10 w-10 text-slate-300 mb-3" />
-              <span className="text-sm font-medium text-indigo-600">Click to upload PDF or TXT</span>
-              <span className="text-xs text-slate-400 mt-1">Up to 10MB</span>
-              <input type="file" className="hidden" accept=".pdf,.txt" onChange={(e) => setSelectedFile(e.target.files[0])} />
-              {selectedFile && <p className="mt-3 text-sm font-medium text-indigo-600">{selectedFile.name}</p>}
-            </label>
+              {selectedFile ? (
+                <p className="text-sm font-medium text-indigo-600 text-center break-all px-2">{selectedFile.name}</p>
+              ) : (
+                <>
+                  <span className="text-sm font-medium text-indigo-600">Tap to upload PDF or TXT</span>
+                  <span className="text-xs text-slate-400 mt-1">Up to 10MB</span>
+                </>
+              )}
+              <input
+                id="file-upload-input"
+                type="file"
+                className="hidden"
+                accept=".pdf,.txt"
+                onChange={(e) => setSelectedFile(e.target.files[0])}
+              />
+            </div>
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
