@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Play, Pause, Download, Loader2, Upload, FileText, Wand2,
-  Sparkles, Globe, Mic, FolderOpen, Lightbulb,
+  Sparkles, Globe, Mic, Lightbulb, BookOpen, Lock,
 } from 'lucide-react';
 import WaveSurfer from 'wavesurfer.js';
 import api from '../lib/api';
@@ -10,6 +11,16 @@ import InteractiveVideoPlayer from '../components/InteractiveVideoPlayer';
 import DashboardStats from '../components/DashboardStats';
 import StepProgress from '../components/StepProgress';
 import Toast from '../components/Toast';
+import ConfirmModal from '../components/ConfirmModal';
+import PublicCourseModal from '../components/PublicCourseModal';
+import { useGeneration } from '../context/GenerationContext';
+
+const LEARNING_SCOPES = [
+  { value: 'auto', label: 'Auto-detect', desc: 'AI picks the best approach' },
+  { value: 'quick-lesson', label: 'Quick Lesson', desc: 'One video — narrow topics like "segment trees"' },
+  { value: 'deep-dive', label: 'Deep Dive', desc: 'One thorough module — e.g. "pointers in C"' },
+  { value: 'full-course', label: 'Full Course', desc: 'Multi-lesson path — e.g. "Learn C"' },
+];
 
 const PROMPT_TYPES = [
   { value: 'explain-detailed', label: 'Detailed Explanation', desc: 'In-depth, university-level' },
@@ -34,6 +45,8 @@ const TOPIC_SUGGESTIONS = [
 ];
 
 export default function Home() {
+  const navigate = useNavigate();
+  const { trackJob } = useGeneration();
   const [inputType, setInputType] = useState('text');
   const [inputText, setInputText] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
@@ -50,6 +63,13 @@ export default function Home() {
   const [newSubjectName, setNewSubjectName] = useState('');
   const [newChapterName, setNewChapterName] = useState('');
   const [outputType, setOutputType] = useState('video');
+  const [learningScope, setLearningScope] = useState('auto');
+  const [isPublic, setIsPublic] = useState(false);
+  const [detectedScope, setDetectedScope] = useState(null);
+  const [publicMatch, setPublicMatch] = useState(null);
+  const [showPublicModal, setShowPublicModal] = useState(false);
+  const [confirmQuick, setConfirmQuick] = useState(false);
+  const [isPlanning, setIsPlanning] = useState(false);
   const [expandedText, setExpandedText] = useState(() => sessionStorage.getItem('expandedText') || '');
   const [isExpanding, setIsExpanding] = useState(false);
   const [currentHistoryId, setCurrentHistoryId] = useState(() => sessionStorage.getItem('currentHistoryId') || null);
@@ -172,42 +192,117 @@ export default function Home() {
     } finally { setIsExpanding(false); }
   };
 
-  const handleGenerateMedia = async () => {
-    if (!expandedText.trim()) return;
-    if (outputType === 'video' && !selectedChapterId) {
-      setToast({ message: 'Select or create a subject & chapter first', type: 'error' });
+  const getQuery = () => (inputType === 'text' ? inputText.trim() : selectedFile?.name || '');
+
+  const resolveScope = async (query) => {
+    if (learningScope !== 'auto') return learningScope;
+    try {
+      const res = await api.post('/api/courses/classify-scope', { query, aiProvider, aiModel });
+      setDetectedScope(res.data.learning_scope);
+      return res.data.learning_scope || 'quick-lesson';
+    } catch {
+      return 'quick-lesson';
+    }
+  };
+
+  const createCoursePlan = async (query, scope) => {
+    setIsPlanning(true);
+    try {
+      const res = await api.post('/api/courses/plan', {
+        query,
+        learningScope: scope,
+        isPublic,
+        aiProvider,
+        aiModel,
+        promptType,
+      });
+      setToast({ message: 'Course plan created!', type: 'success' });
+      navigate(`/course/${res.data.subject.id}`);
+    } catch (err) {
+      setToast({ message: err.response?.data?.error || 'Failed to create plan', type: 'error' });
+    } finally { setIsPlanning(false); }
+  };
+
+  const handleStartLearning = async () => {
+    const query = getQuery();
+    if (!query) return;
+
+    try {
+      const searchRes = await api.get('/api/courses/search', { params: { q: query } });
+      if (searchRes.data.matches?.length > 0) {
+        setPublicMatch(searchRes.data.matches[0]);
+        setShowPublicModal(true);
+        return;
+      }
+    } catch { /* continue */ }
+
+    await proceedWithScope(query);
+  };
+
+  const proceedWithScope = async (query) => {
+    const scope = await resolveScope(query);
+
+    if (scope === 'full-course' || scope === 'deep-dive') {
+      await createCoursePlan(query, scope);
       return;
     }
+
+    let text = expandedText;
+    if (!text.trim()) {
+      setIsExpanding(true);
+      try {
+        const formData = new FormData();
+        if (inputType === 'text') formData.append('text', inputText);
+        else if (selectedFile) formData.append('file', selectedFile);
+        formData.append('promptType', promptType);
+        formData.append('language', textLanguage);
+        formData.append('aiProvider', aiProvider);
+        formData.append('aiModel', aiModel);
+        const response = await api.post('/api/expand-text', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+        text = response.data.expandedText;
+        setExpandedText(text);
+      } catch {
+        setToast({ message: 'Failed to expand text', type: 'error' });
+        return;
+      } finally { setIsExpanding(false); }
+    }
+    if (outputType === 'video') {
+      setConfirmQuick(true);
+    } else {
+      setIsGeneratingMedia(true);
+      try {
+        const audioResponse = await api.post('/api/generate-audio', { text, language: audioLanguage });
+        setAudioUrl(audioResponse.data.audioUrl);
+        setToast({ message: 'Audio generated!', type: 'success' });
+      } catch (err) {
+        setToast({ message: err.response?.data?.error || 'Failed', type: 'error' });
+      } finally { setIsGeneratingMedia(false); }
+    }
+  };
+
+  const startQuickLessonVideo = async () => {
     setIsGeneratingMedia(true);
     try {
-      let generatedAudioUrl = '';
-      let generatedVideoUrl = '';
-      if (outputType === 'video') {
-        const videoResponse = await api.post('/api/generate-video', {
-          text: expandedText,
-          originalTopic: inputType === 'text' ? inputText : (selectedFile?.name || ''),
-          aiProvider, aiModel, language: audioLanguage,
-          chapterId: Number(selectedChapterId),
-          title: inputText.substring(0, 80) || 'Generated Lesson',
-          promptType,
-        });
-        generatedVideoUrl = videoResponse.data.videoUrl;
-        setVideoUrl(generatedVideoUrl);
-        setInteractiveQuizzes(videoResponse.data.interactiveQuizzes || []);
-        generatedAudioUrl = videoResponse.data.audioUrl;
-        setAudioUrl(generatedAudioUrl);
-      } else {
-        const audioResponse = await api.post('/api/generate-audio', { text: expandedText, language: audioLanguage });
-        generatedAudioUrl = audioResponse.data.audioUrl;
-        setAudioUrl(generatedAudioUrl);
-      }
-      if (currentHistoryId) {
-        await api.put(`/api/history/${currentHistoryId}`, { audioUrl: generatedAudioUrl, videoUrl: generatedVideoUrl });
-      }
-      setToast({ message: `${outputType === 'video' ? 'Video' : 'Audio'} generated!`, type: 'success' });
+      const res = await api.post('/api/courses/quick-lesson', {
+        query: getQuery(),
+        expandedText,
+        confirmed: true,
+        isPublic,
+        aiProvider,
+        aiModel,
+        language: audioLanguage,
+        promptType,
+      });
+      trackJob(res.data.jobId, {
+        label: getQuery(),
+        subjectId: res.data.subjectId,
+        chapterId: res.data.chapterId,
+      });
+      setToast({ message: 'Video generating in background — switch tabs freely!', type: 'success' });
+      navigate(`/course/${res.data.subjectId}`);
     } catch (err) {
-      setToast({ message: err.response?.data?.error || 'Failed to generate media', type: 'error' });
-    } finally { setIsGeneratingMedia(false); }
+      setToast({ message: err.response?.data?.error || 'Failed to start', type: 'error' });
+    } finally { setIsGeneratingMedia(false); setConfirmQuick(false); }
   };
 
   return (
@@ -323,6 +418,32 @@ export default function Home() {
             </div>
           </div>
 
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-slate-700">Learning Scope</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {LEARNING_SCOPES.map((s) => (
+                <label key={s.value} className={`flex items-start gap-2 p-3 rounded-xl border cursor-pointer ${learningScope === s.value ? 'border-indigo-300 bg-indigo-50/50' : 'border-slate-100'}`}>
+                  <input type="radio" name="scope" value={s.value} checked={learningScope === s.value} onChange={() => setLearningScope(s.value)} className="mt-1 accent-indigo-600" />
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">{s.label}</p>
+                    <p className="text-xs text-slate-400">{s.desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+            {detectedScope && learningScope === 'auto' && (
+              <p className="text-xs text-indigo-600">Detected: {detectedScope.replace('-', ' ')}</p>
+            )}
+          </div>
+
+          <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 cursor-pointer">
+            <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} className="accent-indigo-600" />
+            <div className="flex items-center gap-2 text-sm text-slate-700">
+              {isPublic ? <Globe className="h-4 w-4 text-indigo-500" /> : <Lock className="h-4 w-4 text-slate-400" />}
+              Share this course publicly (others can use or fork it)
+            </div>
+          </label>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">Content Style</label>
@@ -349,9 +470,14 @@ export default function Home() {
             </div>
           </div>
 
-          <button type="button" onClick={handleExpandText} disabled={isExpanding || (inputType === 'text' ? !inputText.trim() : !selectedFile)} className="btn-primary w-full">
-            {isExpanding ? <><Loader2 className="animate-spin h-5 w-5" /> Expanding with AI...</> : <><Wand2 className="h-5 w-5" /> Expand Text</>}
-          </button>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button type="button" onClick={handleExpandText} disabled={isExpanding || !getQuery()} className="btn-secondary flex-1">
+              {isExpanding ? <><Loader2 className="animate-spin h-5 w-5" /> Expanding...</> : <><BookOpen className="h-5 w-5" /> Expand Text Only</>}
+            </button>
+            <button type="button" onClick={handleStartLearning} disabled={isExpanding || isPlanning || !getQuery()} className="btn-primary flex-1">
+              {isPlanning ? <><Loader2 className="animate-spin h-5 w-5" /> Planning...</> : <><Wand2 className="h-5 w-5" /> Start Learning</>}
+            </button>
+          </div>
         </div>
 
         {/* Step 2: Expanded + Generate */}
@@ -394,38 +520,21 @@ export default function Home() {
             </div>
 
             {outputType === 'video' && (
-              <div className="p-5 bg-gradient-to-br from-indigo-50 to-violet-50 rounded-2xl border border-indigo-100 space-y-3">
-                <p className="text-sm font-semibold text-indigo-900 flex items-center gap-2"><FolderOpen className="h-4 w-4" /> Save to Library</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <select value={selectedSubjectId} onChange={(e) => { setSelectedSubjectId(e.target.value); setSelectedChapterId(''); }} className="input-field py-2.5">
-                    <option value="">Select subject...</option>
-                    {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                  <select value={selectedChapterId} onChange={(e) => setSelectedChapterId(e.target.value)} disabled={!selectedSubjectId} className="input-field py-2.5 disabled:opacity-50">
-                    <option value="">Select chapter...</option>
-                    {chapters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input type="text" placeholder="New subject" value={newSubjectName} onChange={(e) => setNewSubjectName(e.target.value)} className="input-field py-2 text-sm flex-1" />
-                  <button type="button" onClick={handleCreateSubject} className="btn-secondary text-sm">+ Subject</button>
-                </div>
-                {selectedSubjectId && (
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <input type="text" placeholder="New chapter" value={newChapterName} onChange={(e) => setNewChapterName(e.target.value)} className="input-field py-2 text-sm flex-1" />
-                    <button type="button" onClick={handleCreateChapter} className="btn-secondary text-sm">+ Chapter</button>
-                  </div>
-                )}
-              </div>
+              <button type="button" onClick={() => setConfirmQuick(true)} disabled={isGeneratingMedia} className="btn-primary w-full">
+                {isGeneratingMedia ? <><Loader2 className="animate-spin h-5 w-5" /> Starting...</> : 'Generate Quick Lesson Video'}
+              </button>
             )}
-
-            <button type="button" onClick={handleGenerateMedia} disabled={isGeneratingMedia} className="btn-primary w-full">
-              {isGeneratingMedia ? (
-                <><Loader2 className="animate-spin h-5 w-5" />{outputType === 'video' ? ' Generating video (2–5 min)...' : ' Generating audio...'}</>
-              ) : (
-                `Generate ${outputType === 'video' ? 'Interactive Video' : 'Audio'}`
-              )}
-            </button>
+            {outputType === 'audio' && (
+              <button type="button" onClick={async () => {
+                setIsGeneratingMedia(true);
+                try {
+                  const r = await api.post('/api/generate-audio', { text: expandedText, language: audioLanguage });
+                  setAudioUrl(r.data.audioUrl);
+                  setToast({ message: 'Audio ready!', type: 'success' });
+                } catch { setToast({ message: 'Failed', type: 'error' }); }
+                finally { setIsGeneratingMedia(false); }
+              }} className="btn-primary w-full">Generate Audio</button>
+            )}
           </div>
         )}
 
@@ -463,6 +572,40 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      <PublicCourseModal
+        open={showPublicModal}
+        course={publicMatch}
+        onUse={async () => {
+          setShowPublicModal(false);
+          try {
+            const res = await api.post(`/api/courses/${publicMatch.id}/use`);
+            navigate(`/course/${res.data.id}`);
+          } catch { setToast({ message: 'Failed to copy', type: 'error' }); }
+        }}
+        onFork={async () => {
+          setShowPublicModal(false);
+          try {
+            const res = await api.post(`/api/courses/${publicMatch.id}/fork`);
+            navigate(`/course/${res.data.id}`);
+          } catch { setToast({ message: 'Failed to fork', type: 'error' }); }
+        }}
+        onPreview={() => { setShowPublicModal(false); navigate(`/explore/${publicMatch.id}`); }}
+        onGenerateOwn={async () => {
+          setShowPublicModal(false);
+          await proceedWithScope(getQuery());
+        }}
+        onClose={() => setShowPublicModal(false)}
+      />
+
+      <ConfirmModal
+        open={confirmQuick}
+        title="Generate video lesson?"
+        message={`Start AI video generation for "${getQuery()}"? This runs in the background — you can navigate to other tabs while it completes.`}
+        confirmLabel="Yes, generate"
+        onConfirm={startQuickLessonVideo}
+        onCancel={() => setConfirmQuick(false)}
+      />
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>

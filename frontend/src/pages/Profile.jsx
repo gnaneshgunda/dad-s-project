@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Loader2, User, Mail, Calendar, Lock, Video, ChevronRight, Save } from 'lucide-react';
+import { Loader2, User, Mail, Calendar, Lock, Video, ChevronRight, Save, BookOpen, Globe } from 'lucide-react';
 import api from '../lib/api';
 import Toast from '../components/Toast';
 
@@ -75,7 +75,7 @@ export default function Profile() {
     );
   }
 
-  const { user, stats, recentVideos } = profile || {};
+  const { user, stats, recentVideos, courseProgress, activeJobs } = profile || {};
 
   return (
     <div className="min-h-screen py-10 px-4 sm:px-6 lg:px-8">
@@ -113,10 +113,10 @@ export default function Profile() {
         {stats && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
-              { label: 'Subjects', value: stats.subjects },
-              { label: 'Chapters', value: stats.chapters },
+              { label: 'Courses', value: stats.subjects },
+              { label: 'Lessons', value: stats.chapters },
               { label: 'Videos', value: stats.videos },
-              { label: 'Drafts', value: stats.historyItems },
+              { label: 'Public', value: stats.publicCourses },
             ].map((s) => (
               <div key={s.label} className="bg-white rounded-2xl border border-slate-100 p-5 text-center">
                 <p className="text-3xl font-bold text-indigo-600">{s.value}</p>
@@ -185,6 +185,41 @@ export default function Profile() {
             </button>
           </form>
         </div>
+
+        {activeJobs?.length > 0 && (
+          <div className="bg-amber-50 border border-amber-100 rounded-2xl p-5">
+            <h3 className="font-semibold text-amber-900 mb-2">Generating in background</h3>
+            {activeJobs.map((j) => (
+              <p key={j.id} className="text-sm text-amber-800 flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> Job #{j.id} — {j.status}
+              </p>
+            ))}
+          </div>
+        )}
+
+        {courseProgress?.length > 0 && (
+          <div className="bg-white rounded-2xl border border-slate-100 p-6">
+            <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+              <BookOpen className="h-5 w-5 text-indigo-500" /> My Learning Progress
+            </h3>
+            <div className="space-y-3">
+              {courseProgress.map((c) => (
+                <Link key={c.id} to={`/course/${c.id}`} className="block p-4 rounded-xl bg-slate-50 hover:bg-indigo-50 transition-colors">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="font-medium text-slate-800">{c.name}</span>
+                    <span className="text-xs text-slate-400 flex items-center gap-1">
+                      {c.isPublic && <Globe className="h-3 w-3" />}
+                      {c.completed}/{c.total}
+                    </span>
+                  </div>
+                  <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+                    <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${c.percent}%` }} />
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Recent videos */}
         {recentVideos?.length > 0 && (

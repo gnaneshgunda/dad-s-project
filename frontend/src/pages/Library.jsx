@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Loader2, FolderOpen, ChevronRight, ChevronDown, Video, Plus, Trash2, Library as LibraryIcon, MoveRight, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Loader2, FolderOpen, ChevronRight, ChevronDown, Video, Plus, Trash2, Library as LibraryIcon, MoveRight, X, BookOpen } from 'lucide-react';
 import api from '../lib/api';
 import { API_BASE_URL } from '../lib/config';
 import InteractiveVideoPlayer from '../components/InteractiveVideoPlayer';
@@ -180,9 +181,16 @@ export default function Library() {
                     {subject.name}
                     <span className="text-xs font-normal text-slate-400 ml-1">({subject.chapters.length} chapter{subject.chapters.length !== 1 ? 's' : ''})</span>
                   </button>
-                  <button type="button" onClick={() => handleDeleteSubject(subject.id)} className="p-2 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors" title="Delete subject">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    {(subject.learningScope === 'full-course' || subject.learningScope === 'deep-dive' || subject.chapters.length > 1) && (
+                      <Link to={`/course/${subject.id}`} className="p-2 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors" title="Open course">
+                        <BookOpen className="h-4 w-4" />
+                      </Link>
+                    )}
+                    <button type="button" onClick={() => handleDeleteSubject(subject.id)} className="p-2 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors" title="Delete subject">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
 
                 {expandedSubjects[subject.id] && (

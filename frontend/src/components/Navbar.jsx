@@ -1,8 +1,9 @@
-import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Sparkles, Library, User, LogOut, LogIn, UserPlus } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Sparkles, Library, User, LogOut, LogIn, UserPlus, Globe, GraduationCap } from 'lucide-react';
 
 const navLinks = [
   { to: '/', label: 'Studio', icon: Sparkles },
+  { to: '/explore', label: 'Explore', icon: Globe },
   { to: '/library', label: 'Library', icon: Library },
   { to: '/profile', label: 'Profile', icon: User },
 ];
@@ -19,54 +20,46 @@ export default function Navbar() {
 
   return (
     <>
-      {/* Top navbar */}
-      <nav className="sticky top-0 z-40 border-b border-white/10 bg-slate-900/80 backdrop-blur-xl">
+      <nav className="sticky top-0 z-40 border-b border-white/10 bg-slate-900/90 backdrop-blur-xl hidden sm:block">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
             <Link to="/" className="flex items-center gap-2.5">
               <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
-                <Sparkles className="h-5 w-5 text-white" />
+                <GraduationCap className="h-5 w-5 text-white" />
               </div>
               <span className="text-white font-bold text-xl tracking-tight">EduAI</span>
             </Link>
 
-            {/* Desktop nav links */}
             {token && (
-              <div className="hidden sm:flex items-center gap-1">
-                {navLinks.map(({ to, label, icon: Icon }) => {
-                  const active = location.pathname === to;
-                  return (
-                    <Link
-                      key={to}
-                      to={to}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-                        active ? 'bg-white/15 text-white' : 'text-slate-300 hover:text-white hover:bg-white/10'
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {label}
-                    </Link>
-                  );
-                })}
+              <div className="flex items-center gap-1">
+                {navLinks.map(({ to, label, icon: Icon }) => (
+                  <Link
+                    key={to}
+                    to={to}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                      location.pathname === to || (to !== '/' && location.pathname.startsWith(to))
+                        ? 'bg-white/15 text-white'
+                        : 'text-slate-300 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {label}
+                  </Link>
+                ))}
               </div>
             )}
 
             <div className="flex items-center gap-2">
               {token ? (
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
-                >
-                  <LogOut className="h-4 w-4" />
-                  <span className="hidden sm:inline">Logout</span>
+                <button type="button" onClick={handleLogout} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-white/10">
+                  <LogOut className="h-4 w-4" /><span className="hidden md:inline">Logout</span>
                 </button>
               ) : (
                 <>
-                  <Link to="/login" className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-white/10 transition-colors">
+                  <Link to="/login" className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm text-slate-300 hover:text-white hover:bg-white/10">
                     <LogIn className="h-4 w-4" /> Login
                   </Link>
-                  <Link to="/signup" className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-white text-slate-900 hover:bg-slate-100 transition-colors">
+                  <Link to="/signup" className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm bg-white text-slate-900 hover:bg-slate-100">
                     <UserPlus className="h-4 w-4" /> Sign Up
                   </Link>
                 </>
@@ -76,24 +69,22 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* Mobile bottom tab bar */}
       {token && (
-        <nav className="sm:hidden fixed bottom-0 inset-x-0 z-40 bg-slate-900/95 backdrop-blur-xl border-t border-white/10 flex">
-          {navLinks.map(({ to, label, icon: Icon }) => {
-            const active = location.pathname === to;
-            return (
+        <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-white/10 px-2 py-2">
+          <div className="flex justify-around">
+            {navLinks.map(({ to, label, icon: Icon }) => (
               <Link
                 key={to}
                 to={to}
-                className={`flex-1 flex flex-col items-center justify-center py-3 gap-1 text-xs font-medium transition-colors ${
-                  active ? 'text-indigo-400' : 'text-slate-400 hover:text-white'
+                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg text-xs ${
+                  location.pathname === to ? 'text-indigo-400' : 'text-slate-400'
                 }`}
               >
-                <Icon className={`h-5 w-5 ${active ? 'text-indigo-400' : ''}`} />
+                <Icon className="h-5 w-5" />
                 {label}
               </Link>
-            );
-          })}
+            ))}
+          </div>
         </nav>
       )}
     </>
