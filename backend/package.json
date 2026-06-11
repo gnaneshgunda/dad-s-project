@@ -14,10 +14,12 @@
   "type": "commonjs",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@prisma/client": "^5.21.1",
     "bcrypt": "^6.0.0",
     "canvas": "^3.2.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
+    "edge-tts": "^1.0.1",
     "express": "^5.2.1",
     "ffmpeg-static": "^5.3.0",
     "ffprobe-static": "^3.1.0",
@@ -28,6 +30,8 @@
     "multer": "^2.1.1",
     "openai": "^6.37.0",
     "pdf-parse": "^2.4.5",
+    "pexels": "^1.4.0",
+    "prisma": "^5.21.1",
     "sqlite3": "^5.1.7",
     "uuid": "^8.3.2"
   },

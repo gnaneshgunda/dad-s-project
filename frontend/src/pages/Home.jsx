@@ -12,7 +12,7 @@ function Home() {
   const [textLanguage, setTextLanguage] = useState('en');
   const [aiProvider, setAiProvider] = useState('groq');
   const [aiModel, setAiModel] = useState('llama-3.3-70b-versatile');
-  const [audioLanguage, setAudioLanguage] = useState('en');
+  const [audioLanguage, setAudioLanguage] = useState('en-US-AriaNeural');
   const [outputType, setOutputType] = useState('audio'); // 'audio' or 'video'
 
   const [expandedText, setExpandedText] = useState(() => sessionStorage.getItem('expandedText') || '');
@@ -22,9 +22,19 @@ function Home() {
   const [isGeneratingMedia, setIsGeneratingMedia] = useState(false);
   const [audioUrl, setAudioUrl] = useState(() => sessionStorage.getItem('audioUrl') || '');
   const [videoUrl, setVideoUrl] = useState(() => sessionStorage.getItem('videoUrl') || '');
+  const [interactiveQuizzes, setInteractiveQuizzes] = useState(() => JSON.parse(sessionStorage.getItem('interactiveQuizzes') || '[]'));
   const [isSaving, setIsSaving] = useState(false);
 
+  // Video Quiz State
+  const videoRef = useRef(null);
+  const [activeQuiz, setActiveQuiz] = useState(null);
+  const [quizAnswered, setQuizAnswered] = useState({});
+
   // Persist state to sessionStorage so it survives navigation
+  useEffect(() => {
+    sessionStorage.setItem('interactiveQuizzes', JSON.stringify(interactiveQuizzes));
+  }, [interactiveQuizzes]);
+
   useEffect(() => {
     sessionStorage.setItem('expandedText', expandedText);
   }, [expandedText]);
@@ -168,6 +178,10 @@ function Home() {
         setVideoUrl(generatedVideoUrl);
         sessionStorage.setItem('videoUrl', generatedVideoUrl);
 
+        // Set quizzes if they exist
+        const quizzes = videoResponse.data.interactiveQuizzes || [];
+        setInteractiveQuizzes(quizzes);
+
         // The video endpoint now also returns the combined audio
         generatedAudioUrl = videoResponse.data.audioUrl;
         setAudioUrl(generatedAudioUrl);
@@ -218,6 +232,38 @@ function Home() {
   const togglePlayPause = () => {
     if (wavesurfer.current) {
       wavesurfer.current.playPause();
+    }
+  };
+
+  const handleVideoTimeUpdate = () => {
+    if (!videoRef.current || interactiveQuizzes.length === 0) return;
+
+    const currentTime = videoRef.current.currentTime;
+
+    // Check if we hit any quiz timestamp
+    const quizToTrigger = interactiveQuizzes.find(
+      q => Math.abs(q.timestamp_seconds - currentTime) < 0.5 && !quizAnswered[q.timestamp_seconds]
+    );
+
+    if (quizToTrigger && !activeQuiz) {
+      videoRef.current.pause();
+      setActiveQuiz(quizToTrigger);
+    }
+  };
+
+  const handleQuizSubmit = (selectedIndex) => {
+    if (activeQuiz) {
+      const isCorrect = selectedIndex === activeQuiz.correct_index;
+      if (isCorrect) {
+         alert("Correct!");
+      } else {
+         alert("Incorrect! The correct answer was option " + (activeQuiz.correct_index + 1));
+      }
+      setQuizAnswered(prev => ({ ...prev, [activeQuiz.timestamp_seconds]: true }));
+      setActiveQuiz(null);
+      if (videoRef.current) {
+        videoRef.current.play();
+      }
     }
   };
 
@@ -405,18 +451,19 @@ function Home() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Audio Language (Voice)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Audio Voice (Edge TTS)</label>
                   <select
                     value={audioLanguage}
                     onChange={(e) => setAudioLanguage(e.target.value)}
                     className="w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500 p-2 border"
                   >
-                    <option value="en">English</option>
-                    <option value="es">Spanish</option>
-                    <option value="fr">French</option>
-                    <option value="de">German</option>
-                    <option value="te">Telugu</option>
-                    <option value="hi">Hindi</option>
+                    <option value="en-US-AriaNeural">English (US) - Aria</option>
+                    <option value="en-GB-SoniaNeural">English (UK) - Sonia</option>
+                    <option value="te-IN-ShrutiNeural">Telugu (IN) - Shruti</option>
+                    <option value="hi-IN-SwaraNeural">Hindi (IN) - Swara</option>
+                    <option value="es-ES-ElviraNeural">Spanish (ES) - Elvira</option>
+                    <option value="fr-FR-DeniseNeural">French (FR) - Denise</option>
+                    <option value="de-DE-KatjaNeural">German (DE) - Katja</option>
                   </select>
                 </div>
               </div>
@@ -494,7 +541,7 @@ function Home() {
         {videoUrl && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 transition-all duration-500">
              <div className="flex justify-between items-center mb-4">
-               <h2 className="text-lg font-medium text-gray-900">Video Player</h2>
+               <h2 className="text-lg font-medium text-gray-900">Interactive Video Player</h2>
                <a
                  href={`${API_BASE_URL}${videoUrl}`}
                  download="explanation.mp4"
@@ -506,11 +553,36 @@ function Home() {
                  Download Video
                </a>
              </div>
-             <video
-               src={`${API_BASE_URL}${videoUrl}`}
-               controls
-               className="w-full rounded-md shadow-sm bg-black"
-             />
+
+             <div className="relative w-full rounded-md shadow-sm bg-black overflow-hidden aspect-video">
+               <video
+                 ref={videoRef}
+                 src={`${API_BASE_URL}${videoUrl}`}
+                 controls={!activeQuiz} // hide controls when quiz is active to prevent seeking past it
+                 onTimeUpdate={handleVideoTimeUpdate}
+                 className="w-full h-full object-contain"
+               />
+
+               {/* Quiz Overlay */}
+               {activeQuiz && (
+                 <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-6 z-10">
+                   <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-8 text-center animate-in fade-in zoom-in duration-300">
+                     <h3 className="text-2xl font-bold text-gray-900 mb-6">{activeQuiz.question}</h3>
+                     <div className="space-y-3">
+                       {activeQuiz.options.map((option, idx) => (
+                         <button
+                           key={idx}
+                           onClick={() => handleQuizSubmit(idx)}
+                           className="w-full py-3 px-6 text-left border-2 border-indigo-100 hover:border-indigo-500 hover:bg-indigo-50 rounded-lg transition-all text-gray-700 font-medium text-lg"
+                         >
+                           {String.fromCharCode(65 + idx)}. {option}
+                         </button>
+                       ))}
+                     </div>
+                   </div>
+                 </div>
+               )}
+             </div>
           </div>
         )}
 
