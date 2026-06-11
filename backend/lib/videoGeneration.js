@@ -97,7 +97,7 @@ async function generateVideo({
   const videoListFilePath = path.join(videoDir, `${uuidv4()}_video_list.txt`);
 
   try {
-    const prompt = buildSlideGenerationPrompt(text, language, promptType || 'explain-detailed', originalTopic || text);
+    const prompt = buildSlideGenerationPrompt(originalTopic || text, language, promptType || 'explain-detailed', text);
     const rawResponse = await callLlm(prompt, aiProvider, aiModel, getNextGroqClient, getNextGeminiModel);
 
     let payload;

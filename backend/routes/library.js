@@ -190,4 +190,38 @@ router.get('/videos/:id', authMiddleware, async (req, res) => {
   }
 });
 
+router.delete('/videos/:id', authMiddleware, async (req, res) => {
+  const videoId = Number(req.params.id);
+  try {
+    const video = await db.video.findFirst({
+      where: { id: videoId, chapter: { subject: { userId: req.user.id } } },
+    });
+    if (!video) return res.status(404).json({ error: 'Video not found' });
+    await db.video.delete({ where: { id: videoId } });
+    res.json({ message: 'Video deleted' });
+  } catch (err) {
+    console.error('Error deleting video:', err);
+    res.status(500).json({ error: 'Failed to delete video' });
+  }
+});
+
+router.patch('/videos/:id/move', authMiddleware, async (req, res) => {
+  const videoId = Number(req.params.id);
+  const { chapterId } = req.body;
+  if (!chapterId) return res.status(400).json({ error: 'chapterId is required' });
+  try {
+    const [video, targetChapter] = await Promise.all([
+      db.video.findFirst({ where: { id: videoId, chapter: { subject: { userId: req.user.id } } } }),
+      db.chapter.findFirst({ where: { id: Number(chapterId), subject: { userId: req.user.id } } }),
+    ]);
+    if (!video) return res.status(404).json({ error: 'Video not found' });
+    if (!targetChapter) return res.status(404).json({ error: 'Target chapter not found' });
+    await db.video.update({ where: { id: videoId }, data: { chapterId: Number(chapterId) } });
+    res.json({ message: 'Video moved' });
+  } catch (err) {
+    console.error('Error moving video:', err);
+    res.status(500).json({ error: 'Failed to move video' });
+  }
+});
+
 module.exports = router;

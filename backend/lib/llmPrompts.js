@@ -112,7 +112,10 @@ GENERAL RULES:
 - Use \\n for line breaks in display_text.
 
 User Topic:
-${text}`;
+${text}
+
+${originalTopic && originalTopic !== text ? `Supporting Reference (pre-expanded content — use for depth but do NOT limit yourself to it):
+${originalTopic}` : ''}`;
 }
 
 function parseSlideGenerationResponse(rawText) {
