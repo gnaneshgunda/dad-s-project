@@ -159,6 +159,8 @@ async function generateVideo({
       const slideImageFilename = `${uuidv4()}_slide.jpg`;
       const slideImageFilePath = path.join(videoDir, slideImageFilename);
       fs.writeFileSync(slideImageFilePath, slideBuffer);
+      // free large buffers immediately
+      imageResult = null;
       slidePaths.push(slideImageFilePath);
 
       videoListContent += `file '${slideImageFilePath.replace(/\\/g, '/')}'\n`;
@@ -190,6 +192,9 @@ async function generateVideo({
         .outputOptions([
           '-pix_fmt', 'yuv420p',
           `-t ${totalAudioDuration.toFixed(2)}`,
+          '-preset ultrafast',
+          '-crf 28',
+          '-threads 1',
         ])
         .save(videoFilePath)
         .on('end', resolve)

@@ -1,7 +1,7 @@
 const { createCanvas } = require('canvas');
 
-const FRAME_W = 1280;
-const FRAME_H = 720;
+const FRAME_W = 960;
+const FRAME_H = 540;
 const MARGIN = 48;
 const CARD_RADIUS = 24;
 const IMAGE_RADIUS = 16;
@@ -276,7 +276,7 @@ async function renderSlide(slide, imageResult) {
     drawTextBlock(ctx, slide.display_text, MARGIN, MARGIN, FRAME_W - MARGIN * 2, FRAME_H - MARGIN * 2);
   }
 
-  return canvas.toBuffer('image/jpeg', { quality: 0.92 });
+  return canvas.toBuffer('image/jpeg', { quality: 0.82 });
 }
 
 module.exports = {
