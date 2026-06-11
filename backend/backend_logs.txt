@@ -1,0 +1,44 @@
+
+> backend@1.0.0 dev
+> nodemon server.js
+
+[33m[nodemon] 3.1.14[39m
+[33m[nodemon] to restart at any time, enter `rs`[39m
+[33m[nodemon] watching path(s): *.*[39m
+[33m[nodemon] watching extensions: js,mjs,cjs,json[39m
+[32m[nodemon] starting `node server.js`[39m
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+(node:607494) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Server running on port 3001
+Error expanding text: AuthenticationError: 401 {"error":{"message":"Invalid API Key","type":"invalid_request_error","code":"invalid_api_key"}}
+    at APIError.generate (/app/backend/node_modules/groq-sdk/core/error.js:43:20)
+    at Groq.makeStatusError (/app/backend/node_modules/groq-sdk/client.js:138:32)
+    at Groq.makeRequest (/app/backend/node_modules/groq-sdk/client.js:280:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async /app/backend/server.js:175:26 {
+  status: 401,
+  headers: Headers {
+    date: 'Wed, 10 Jun 2026 17:52:20 GMT',
+    'content-type': 'application/json',
+    'content-length': '96',
+    connection: 'keep-alive',
+    'cache-control': 'private, max-age=0, no-store, no-cache, must-revalidate',
+    server: 'cloudflare',
+    vary: 'Origin',
+    'x-groq-region': 'yul',
+    'x-request-id': 'req_01ktsaktaaezg9rh1fgj0nfxfg',
+    'set-cookie': '__cf_bm=HGl1qmK0QamReMKqtTYBaacp_8D6rV_cHUXUrRcg35A-1781113940.2749577-1.0.1.1-2NKSVtB14DK_ga7boytul3he5QSF5JXspE_sAPNQ5DyslRpJr1UCeKIvGgwal8.ep1eML4FN038..vNnFu6.cGU6.yBvzBB0BfEBnKOXvY8UmgAFSM6EuwX7csgWaOgB; HttpOnly; SameSite=None; Secure; Path=/; Domain=groq.com; Expires=Wed, 10 Jun 2026 18:22:20 GMT',
+    'strict-transport-security': 'max-age=15552000',
+    'cf-cache-status': 'DYNAMIC',
+    'cf-ray': 'a09a3aaebdb8e819-ORD',
+    'alt-svc': 'h3=":443"; ma=86400'
+  },
+  error: {
+    error: {
+      message: 'Invalid API Key',
+      type: 'invalid_request_error',
+      code: 'invalid_api_key'
+    }
+  }
+}

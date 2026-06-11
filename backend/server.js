@@ -79,23 +79,28 @@ app.post('/api/signup', async (req, res) => {
 
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
-    db.run('INSERT INTO users (email, password) VALUES (?, ?)', [email, hashedPassword], function(err) {
-      if (err) {
-        if (err.message.includes('UNIQUE constraint failed')) {
-          return res.status(400).json({ error: 'Email already exists' });
-        }
-        return res.status(500).json({ error: 'Failed to create user' });
-      }
+    try {
+      const user = await db.user.create({
+        data: {
+          email,
+          password: hashedPassword,
+        },
+      });
 
-      const token = jwt.sign({ id: this.lastID, email }, JWT_SECRET, { expiresIn: '7d' });
-      res.status(201).json({ token, user: { id: this.lastID, email } });
-    });
+      const token = jwt.sign({ id: user.id, email }, JWT_SECRET, { expiresIn: '7d' });
+      res.status(201).json({ token, user: { id: user.id, email } });
+    } catch (err) {
+      if (err.code === 'P2002') {
+        return res.status(400).json({ error: 'Email already exists' });
+      }
+      return res.status(500).json({ error: 'Failed to create user' });
+    }
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   let { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' });
@@ -103,8 +108,8 @@ app.post('/api/login', (req, res) => {
 
   email = email.trim().toLowerCase();
 
-  db.get('SELECT * FROM users WHERE email = ?', [email], async (err, user) => {
-    if (err) return res.status(500).json({ error: 'Database error' });
+  try {
+    const user = await db.user.findUnique({ where: { email } });
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
     const isMatch = await bcrypt.compare(password, user.password);
@@ -112,7 +117,9 @@ app.post('/api/login', (req, res) => {
 
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { id: user.id, email: user.email } });
-  });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // Endpoint 1: Expand text (and handle file uploads)
