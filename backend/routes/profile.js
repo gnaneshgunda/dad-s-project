@@ -2,37 +2,43 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const db = require('../db/index');
 const authMiddleware = require('../middleware/auth');
-const { getWatchedChapterIds, buildCourseProgress } = require('../lib/progressUtils');
+const { buildCourseProgress } = require('../lib/progressUtils');
 
 const router = express.Router();
 
 router.get('/profile', authMiddleware, async (req, res) => {
   try {
-    const user = await db.user.findUnique({
-      where: { id: req.user.id },
-      select: { id: true, email: true, name: true, createdAt: true },
-    });
+    const userId = req.user.id;
 
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const [subjectCount, chapterCount, videoCount, historyCount] = await Promise.all([
-      db.subject.count({ where: { userId: req.user.id } }),
-      db.chapter.count({ where: { subject: { userId: req.user.id } } }),
-      db.video.count({ where: { chapter: { subject: { userId: req.user.id } } } }),
-      db.history.count({ where: { userId: req.user.id } }),
-    ]);
-
-    const ownedSubjectIds = await db.subject.findMany({
-      where: { userId: req.user.id },
-      select: { id: true },
-    });
-    const ownedIds = ownedSubjectIds.map((s) => s.id);
-
-    const [recentVideos, courses, publicCourses, activeJobs, courseAdopters] = await Promise.all([
+    // Single DB connection for all reads — avoids Supabase session-pool exhaustion.
+    const [
+      user,
+      ownedSubjects,
+      courses,
+      recentVideos,
+      activeJobs,
+      watchedProgress,
+      publicCourses,
+      historyCount,
+    ] = await db.$transaction([
+      db.user.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, name: true, createdAt: true },
+      }),
+      db.subject.findMany({
+        where: { userId },
+        select: { id: true },
+      }),
+      db.subject.findMany({
+        where: { userId },
+        include: {
+          chapters: { include: { videos: { take: 1, orderBy: { createdAt: 'desc' } } } },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 6,
+      }),
       db.video.findMany({
-        where: { chapter: { subject: { userId: req.user.id } } },
+        where: { chapter: { subject: { userId } } },
         orderBy: { createdAt: 'desc' },
         take: 5,
         select: {
@@ -42,27 +48,37 @@ router.get('/profile', authMiddleware, async (req, res) => {
           chapter: { select: { name: true, subject: { select: { id: true, name: true } } } },
         },
       }),
-      db.subject.findMany({
-        where: { userId: req.user.id },
-        include: {
-          chapters: { include: { videos: { take: 1 } } },
-        },
-        orderBy: { updatedAt: 'desc' },
-        take: 6,
-      }),
-      db.subject.count({ where: { userId: req.user.id, isPublic: true } }),
       db.generationJob.findMany({
-        where: { userId: req.user.id, status: { in: ['pending', 'running'] } },
+        where: { userId, status: { in: ['pending', 'running'] } },
         orderBy: { createdAt: 'desc' },
         take: 5,
       }),
-      ownedIds.length > 0
-        ? db.subject.count({ where: { sourceSubjectId: { in: ownedIds } } })
-        : Promise.resolve(0),
+      db.lessonProgress.findMany({
+        where: { userId, completed: true },
+        select: { chapterId: true },
+      }),
+      db.subject.count({ where: { userId, isPublic: true } }),
+      db.history.count({ where: { userId } }),
     ]);
 
-    const allChapterIds = courses.flatMap((c) => c.chapters.map((ch) => ch.id));
-    const watchedSet = await getWatchedChapterIds(db, req.user.id, allChapterIds);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const ownedIds = ownedSubjects.map((s) => s.id);
+    let courseAdopters = 0;
+    let chapterCount = 0;
+    let videoCount = 0;
+
+    if (ownedIds.length > 0) {
+      [courseAdopters, chapterCount, videoCount] = await db.$transaction([
+        db.subject.count({ where: { sourceSubjectId: { in: ownedIds } } }),
+        db.chapter.count({ where: { subjectId: { in: ownedIds } } }),
+        db.video.count({ where: { chapter: { subjectId: { in: ownedIds } } } }),
+      ]);
+    }
+
+    const watchedSet = new Set(watchedProgress.map((w) => w.chapterId));
 
     const courseProgress = courses.map((c) => ({
       id: c.id,
@@ -75,7 +91,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
     res.json({
       user,
       stats: {
-        subjects: subjectCount,
+        subjects: ownedSubjects.length,
         chapters: chapterCount,
         videos: videoCount,
         historyItems: historyCount,

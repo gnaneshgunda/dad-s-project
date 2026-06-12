@@ -6,10 +6,14 @@ const GenerationContext = createContext(null);
 export function GenerationProvider({ children }) {
   const [jobs, setJobs] = useState([]);
   const hasActiveRef = useRef(false);
+  const tabVisibleRef = useRef(true);
+  const dismissedFailedRef = useRef(new Set(
+    JSON.parse(sessionStorage.getItem('dismissedFailedJobs') || '[]')
+  ));
 
   const pollJobs = useCallback(async () => {
     const token = localStorage.getItem('token');
-    if (!token) return;
+    if (!token || !tabVisibleRef.current) return;
 
     try {
       const activeRes = await api.get('/api/generation-jobs');
@@ -19,20 +23,30 @@ export function GenerationProvider({ children }) {
       setJobs((prev) => {
         const map = new Map();
         prev.forEach((j) => map.set(j.id, j));
-        incoming.forEach((j) => map.set(j.id, { ...map.get(j.id), ...j }));
+        incoming.forEach((j) => {
+          const existing = map.get(j.id);
+          map.set(j.id, {
+            ...existing,
+            ...j,
+            dismissed: dismissedFailedRef.current.has(j.id) || existing?.dismissed,
+          });
+        });
         return Array.from(map.values())
           .filter((j) => {
             if (j.status === 'pending' || j.status === 'running') return true;
-            if (j.status === 'completed' || j.status === 'failed') {
+            if (j.status === 'completed') {
               const updated = j.updatedAt ? new Date(j.updatedAt).getTime() : Date.now();
-              return Date.now() - updated < 3 * 60 * 1000;
+              return Date.now() - updated < 2 * 60 * 1000;
+            }
+            if (j.status === 'failed') {
+              return !dismissedFailedRef.current.has(j.id);
             }
             return false;
           })
           .sort((a, b) => b.id - a.id);
       });
     } catch {
-      // backend may be offline — don't spam
+      // skip tick on network/db errors
     }
   }, []);
 
@@ -49,14 +63,35 @@ export function GenerationProvider({ children }) {
     setJobs((prev) => prev.filter((j) => j.id !== jobId));
   }, []);
 
+  const dismissFailed = useCallback((jobId) => {
+    dismissedFailedRef.current.add(jobId);
+    sessionStorage.setItem(
+      'dismissedFailedJobs',
+      JSON.stringify([...dismissedFailedRef.current].slice(-50))
+    );
+    setJobs((prev) => prev.map((j) => (j.id === jobId ? { ...j, dismissed: true } : j))
+      .filter((j) => !(j.status === 'failed' && j.dismissed)));
+  }, []);
+
   useEffect(() => {
+    const onVisibility = () => {
+      tabVisibleRef.current = document.visibilityState === 'visible';
+      if (tabVisibleRef.current) pollJobs();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
     let cancelled = false;
     let timer;
 
     const tick = async () => {
       await pollJobs();
       if (!cancelled) {
-        timer = setTimeout(tick, hasActiveRef.current ? 2500 : 12000);
+        const ms = !tabVisibleRef.current
+          ? 60000
+          : hasActiveRef.current
+            ? 5000
+            : 30000;
+        timer = setTimeout(tick, ms);
       }
     };
 
@@ -64,11 +99,12 @@ export function GenerationProvider({ children }) {
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [pollJobs]);
 
   return (
-    <GenerationContext.Provider value={{ jobs, trackJob, removeJob, pollJobs }}>
+    <GenerationContext.Provider value={{ jobs, trackJob, removeJob, dismissFailed, pollJobs }}>
       {children}
     </GenerationContext.Provider>
   );

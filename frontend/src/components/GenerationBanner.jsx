@@ -17,10 +17,11 @@ const STEP_LABELS = {
 
 export default function GenerationBanner() {
   const navigate = useNavigate();
-  const { jobs, removeJob } = useGeneration();
+  const { jobs, removeJob, dismissFailed } = useGeneration();
   const active = jobs.filter((j) => j.status === 'pending' || j.status === 'running');
-  const finished = jobs.filter((j) => j.status === 'completed').slice(0, 2);
-  const failed = jobs.filter((j) => j.status === 'failed').slice(0, 2);
+  const finished = jobs.filter((j) => j.status === 'completed').slice(0, 1);
+  const failed = jobs.filter((j) => j.status === 'failed' && !j.dismissed).slice(0, 1);
+  const failedExtra = jobs.filter((j) => j.status === 'failed' && !j.dismissed).length - 1;
 
   const goToJob = (job) => {
     if (job.subjectId) {
@@ -85,15 +86,25 @@ export default function GenerationBanner() {
       ))}
 
       {failed.map((job) => (
-        <div key={`fail-${job.id}`} className="bg-red-600 text-white rounded-xl shadow-xl px-4 py-3 flex items-center gap-3 pointer-events-auto">
-          <AlertCircle className="h-5 w-5 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">Failed: {job.label || 'Video'}</p>
-            <p className="text-xs text-red-100 truncate">{job.error || 'Generation error'}</p>
+        <div key={`fail-${job.id}`} className="bg-red-600 text-white rounded-xl shadow-xl px-4 py-3 pointer-events-auto">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="h-5 w-5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">Failed: {job.label || 'Video'}</p>
+              <p className="text-xs text-red-100 line-clamp-2">{job.error || 'Generation error'}</p>
+              {failedExtra > 0 && (
+                <p className="text-xs text-red-200/80 mt-0.5">+{failedExtra} other failed job{failedExtra !== 1 ? 's' : ''}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => dismissFailed(job.id)}
+              className="opacity-70 hover:opacity-100 shrink-0"
+              title="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button type="button" onClick={() => removeJob(job.id)} className="opacity-70 hover:opacity-100">
-            <X className="h-4 w-4" />
-          </button>
         </div>
       ))}
     </div>

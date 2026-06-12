@@ -27,6 +27,9 @@ export default function Course() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [theaterMode, setTheaterMode] = useState(false);
   const lessonRefs = useRef({});
+  const handledJobsRef = useRef(new Set());
+  const loadErrorShownRef = useRef(false);
+  const [videoLoading, setVideoLoading] = useState(false);
 
   const loadCourse = useCallback(async () => {
     try {
@@ -34,7 +37,10 @@ export default function Course() {
       setCourse(res.data);
       return res.data;
     } catch {
-      setToast({ message: 'Failed to load course', type: 'error' });
+      if (!loadErrorShownRef.current) {
+        loadErrorShownRef.current = true;
+        setToast({ message: 'Failed to load course', type: 'error' });
+      }
       return null;
     } finally {
       setLoading(false);
@@ -44,22 +50,30 @@ export default function Course() {
   useEffect(() => { loadCourse(); }, [loadCourse]);
 
   useEffect(() => {
-    const relevant = jobs.filter((j) => j.subjectId === Number(id));
-    if (relevant.some((j) => j.status === 'completed' || j.status === 'failed')) {
-      loadCourse();
-    }
+    jobs
+      .filter((j) => j.subjectId === Number(id) && (j.status === 'completed' || j.status === 'failed'))
+      .forEach((j) => {
+        if (!handledJobsRef.current.has(j.id)) {
+          handledJobsRef.current.add(j.id);
+          loadCourse();
+        }
+      });
   }, [jobs, id, loadCourse]);
 
   const selectChapter = useCallback(async (chapter) => {
     if (!chapter.videos?.length) return;
+    setVideoLoading(true);
     setActiveChapterId(chapter.id);
     const video = chapter.videos[0];
     setActiveVideo(video);
+    setActiveQuizzes([]);
     try {
       const res = await api.get(`/api/videos/${video.id}`);
       setActiveQuizzes(res.data.interactiveQuizzes || []);
     } catch {
       setActiveQuizzes([]);
+    } finally {
+      setVideoLoading(false);
     }
   }, []);
 
@@ -166,7 +180,7 @@ export default function Course() {
   const activeChapter = course.chapters.find((c) => c.id === activeChapterId);
 
   return (
-    <div className={`flex flex-col bg-slate-50 ${theaterMode ? 'fixed inset-0 z-50 bg-black' : 'h-[calc(100dvh-4rem)] sm:h-[calc(100dvh-4rem)] pb-16 sm:pb-0'}`}>
+    <div className="flex flex-col bg-slate-50 h-[calc(100dvh-4rem)] sm:h-[calc(100dvh-4rem)] pb-16 sm:pb-0">
       {/* Header */}
       {!theaterMode && (
         <div className="shrink-0 border-b border-slate-200 bg-white px-3 sm:px-5 py-3">
@@ -277,13 +291,14 @@ export default function Course() {
         )}
 
         {/* Video area */}
-        <main className={`flex-1 flex flex-col min-h-0 min-w-0 ${theaterMode ? 'bg-black' : 'p-3 sm:p-4 lg:w-[70%]'}`}>
+        <main className={`flex-1 flex flex-col min-h-0 min-w-0 ${theaterMode ? 'fixed inset-0 z-50 bg-black p-3 sm:p-4' : 'p-3 sm:p-4 lg:w-[70%]'}`}>
           {theaterMode && (
-            <div className="absolute top-3 left-3 z-20 flex gap-2">
+            <div className="flex items-center justify-between mb-2 shrink-0">
+              <h2 className="font-semibold text-white text-sm truncate">{activeChapter?.name}</h2>
               <button
                 type="button"
-                onClick={() => setTheaterMode(false)}
-                className="p-2 rounded-lg bg-black/60 text-white hover:bg-black/80"
+                onClick={() => { setTheaterMode(false); setSidebarOpen(true); }}
+                className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20"
               >
                 <Minimize2 className="h-4 w-4" />
               </button>
@@ -305,16 +320,24 @@ export default function Course() {
           )}
 
           {activeVideo?.videoUrl ? (
-            <InteractiveVideoPlayer
-              key={activeVideo.id}
-              videoUrl={activeVideo.videoUrl}
-              interactiveQuizzes={activeQuizzes}
-              apiBaseUrl={API_BASE_URL}
-              embedded
-              showHeader={false}
-              onLessonComplete={markLessonComplete}
-              className="flex-1 min-h-0"
-            />
+            <div className="relative flex-1 flex flex-col min-h-0">
+              {videoLoading && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-900/70 rounded-xl gap-2">
+                  <Loader2 className="h-8 w-8 text-indigo-400 animate-spin" />
+                  <p className="text-sm text-white">Preparing lesson…</p>
+                </div>
+              )}
+              <InteractiveVideoPlayer
+                key={activeVideo.id}
+                videoUrl={activeVideo.videoUrl}
+                interactiveQuizzes={activeQuizzes}
+                apiBaseUrl={API_BASE_URL}
+                embedded
+                showHeader={false}
+                onLessonComplete={markLessonComplete}
+                className="flex-1 min-h-0"
+              />
+            </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-white rounded-2xl border border-slate-100">
               <Video className="h-12 w-12 text-slate-300 mb-4" />

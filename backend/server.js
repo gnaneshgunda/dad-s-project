@@ -105,7 +105,12 @@ if (!fs.existsSync(videoDir)) {
   fs.mkdirSync(videoDir);
 }
 
-const callLlm = createLlmCaller(getNextGroqClient, getNextGeminiModel);
+const callLlm = createLlmCaller({
+  getNextGroqClient,
+  getGroqKeyCount: () => groqApiKeys.length,
+  getNextGeminiModel,
+  getGeminiKeyCount: () => geminiApiKeys.length,
+});
 app.use('/api', initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }));
 
 // Authentication Endpoints
