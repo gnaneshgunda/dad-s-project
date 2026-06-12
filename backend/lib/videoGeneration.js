@@ -12,6 +12,7 @@ const {
 const { resolveSlideImage } = require('./stockPhotos');
 const { renderSlide } = require('./slideRenderer');
 const { resolveEdgeVoice } = require('./voices');
+const { uploadVideo, uploadAudio } = require('./storage');
 
 async function generateAudioFile(text, voice, filepath) {
   await new Promise((resolve, reject) => {
@@ -246,9 +247,19 @@ async function generateVideo({
 
     const interactiveQuizzes = buildQuizTimestamps(payload.interactive_quizzes, slideEndTimes);
 
+    // Upload to Supabase Storage if configured, otherwise fall back to local serving
+    const [publicVideoUrl, publicAudioUrl] = await Promise.all([
+      uploadVideo(videoFilePath, videoFilename),
+      uploadAudio(combinedAudioFilePath, combinedAudioFilename),
+    ]);
+
+    // Clean up local files once uploaded
+    if (publicVideoUrl) { try { fs.unlinkSync(videoFilePath); } catch { /* ignore */ } }
+    if (publicAudioUrl) { try { fs.unlinkSync(combinedAudioFilePath); } catch { /* ignore */ } }
+
     return {
-      videoUrl: `/api/video/${videoFilename}`,
-      audioUrl: `/api/audio/${combinedAudioFilename}`,
+      videoUrl: publicVideoUrl || `/api/video/${videoFilename}`,
+      audioUrl: publicAudioUrl || `/api/audio/${combinedAudioFilename}`,
       interactiveQuizzes,
       slidesJson: JSON.stringify(slides),
       quizzesJson: JSON.stringify(interactiveQuizzes),

@@ -348,24 +348,58 @@ app.post('/api/generate-video', authMiddleware, async (req, res) => {
 });
 
 // Endpoint 3: Serve audio file
+app.options('/api/audio/:filename', (req, res) => res.sendStatus(204));
 app.get('/api/audio/:filename', (req, res) => {
-  const { filename } = req.params;
-  res.sendFile(filename, { root: audioDir }, (err) => {
-    if (err && err.code !== 'EPIPE' && err.code !== 'ECONNABORTED' && err.status !== 404) {
-      console.error('Error serving file:', err);
-    }
-  });
+  const filepath = path.join(audioDir, path.basename(req.params.filename));
+  if (!fs.existsSync(filepath)) return res.status(404).end();
+  serveFileWithRange(req, res, filepath);
 });
 
 // Endpoint 4: Serve video file
+app.options('/api/video/:filename', (req, res) => res.sendStatus(204));
 app.get('/api/video/:filename', (req, res) => {
-  const { filename } = req.params;
-  res.sendFile(filename, { root: videoDir }, (err) => {
-    if (err && err.code !== 'EPIPE' && err.code !== 'ECONNABORTED' && err.status !== 404) {
-      console.error('Error serving file:', err);
-    }
-  });
+  const filepath = path.join(videoDir, path.basename(req.params.filename));
+  if (!fs.existsSync(filepath)) return res.status(404).end();
+  serveFileWithRange(req, res, filepath);
 });
+
+function serveFileWithRange(req, res, filepath) {
+  const stat = fs.statSync(filepath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+  const ext = path.extname(filepath).toLowerCase();
+  const mimeTypes = { '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.webm': 'video/webm' };
+  const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': req.headers.origin || '*',
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
+  };
+
+  if (range) {
+    const [startStr, endStr] = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(startStr, 10);
+    const end = endStr ? parseInt(endStr, 10) : fileSize - 1;
+    const chunkSize = end - start + 1;
+    res.writeHead(206, {
+      ...corsHeaders,
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunkSize,
+      'Content-Type': contentType,
+    });
+    fs.createReadStream(filepath, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, {
+      ...corsHeaders,
+      'Content-Length': fileSize,
+      'Content-Type': contentType,
+      'Accept-Ranges': 'bytes',
+    });
+    fs.createReadStream(filepath).pipe(res);
+  }
+}
 
 // History Endpoints
 
