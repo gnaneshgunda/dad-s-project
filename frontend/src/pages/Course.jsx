@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import {
   Loader2, ChevronLeft, Play, RefreshCw, Lock, Globe, Video,
-  PanelLeft, PanelLeftClose, Maximize2, Minimize2, Eye, X,
+  PanelLeft, PanelLeftClose, Maximize2, Minimize2, Eye, X, Mic,
 } from 'lucide-react';
 import api from '../lib/api';
 import { API_BASE_URL } from '../lib/config';
@@ -30,11 +30,25 @@ export default function Course() {
   const handledJobsRef = useRef(new Set());
   const loadErrorShownRef = useRef(false);
   const [videoLoading, setVideoLoading] = useState(false);
+  const [voices, setVoices] = useState([]);
+  const [courseLanguage, setCourseLanguage] = useState('en-US-AriaNeural');
+
+  useEffect(() => {
+    api.get('/api/voices').then((res) => setVoices(res.data)).catch(() => {
+      setVoices([
+        { id: 'en-US-AriaNeural', label: 'English (US) — Aria' },
+        { id: 'te-IN-ShrutiNeural', label: 'Telugu — Shruti' },
+        { id: 'te-IN-MohanNeural', label: 'Telugu — Mohan' },
+        { id: 'hi-IN-SwaraNeural', label: 'Hindi — Swara' },
+      ]);
+    });
+  }, []);
 
   const loadCourse = useCallback(async () => {
     try {
       const res = await api.get(`/api/courses/${id}`);
       setCourse(res.data);
+      setCourseLanguage(res.data.language || 'en-US-AriaNeural');
       return res.data;
     } catch {
       if (!loadErrorShownRef.current) {
@@ -111,12 +125,14 @@ export default function Course() {
 
   const startGenerate = async (chapter, regenerate) => {
     try {
+      // Persist the chosen voice back to the subject so future generations use it
+      await api.patch(`/api/courses/${id}`, { language: courseLanguage }).catch(() => {});
       const res = await api.post(`/api/chapters/${chapter.id}/generate`, {
         confirmed: true,
         regenerate,
         aiProvider: 'groq',
         aiModel: 'llama-3.3-70b-versatile',
-        language: 'en-US-AriaNeural',
+        language: courseLanguage,
         promptType: 'explain-detailed',
         expandedText: chapter.topicQuery || chapter.name,
       });
@@ -397,7 +413,22 @@ export default function Course() {
       <ConfirmModal
         open={!!confirm}
         title={confirm?.title}
-        message={confirm?.message}
+        message={
+          <>
+            {confirm?.message}
+            <label className="flex items-center gap-2 mt-4 text-sm">
+              <Mic className="h-4 w-4 text-indigo-500 shrink-0" />
+              <span className="text-slate-600 shrink-0">Voice:</span>
+              <select
+                value={courseLanguage}
+                onChange={(e) => setCourseLanguage(e.target.value)}
+                className="flex-1 input-field py-1.5 text-sm"
+              >
+                {voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+              </select>
+            </label>
+          </>
+        }
         confirmLabel={confirm?.regenerate ? 'Yes, regenerate' : 'Yes, generate'}
         variant={confirm?.regenerate ? 'danger' : 'primary'}
         onConfirm={() => {

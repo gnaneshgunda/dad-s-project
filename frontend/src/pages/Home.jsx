@@ -215,6 +215,7 @@ export default function Home() {
         aiProvider,
         aiModel,
         promptType,
+        language: audioLanguage,
       });
       setToast({ message: 'Course plan created!', type: 'success' });
       navigate(`/course/${res.data.subject.id}`);
