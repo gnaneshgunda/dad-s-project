@@ -69,23 +69,46 @@ function parseSlideGenerationResponse(rawText) {
     cleaned = cleaned.slice(start, end + 1);
   }
 
+  // Strategy 1: direct parse (ideal path)
   try {
     return JSON.parse(cleaned);
-  } catch (_) {
-    // JSON was truncated — recover last complete slide
+  } catch (_) { /* fall through */ }
+
+  // Strategy 2: balanced-brace scan — extracts every complete slide object.
+  // Correctly handles escape sequences even in truncated responses.
+  try {
     const slidesStart = cleaned.indexOf('"slides"');
-    if (slidesStart === -1) throw new Error('No slides key found in response');
-
+    if (slidesStart === -1) throw new Error('no slides key');
     const arrStart = cleaned.indexOf('[', slidesStart);
-    if (arrStart === -1) throw new Error('No slides array found');
+    if (arrStart === -1) throw new Error('no slides array');
 
-    let i = cleaned.length - 1;
-    while (i > arrStart && cleaned[i] !== '}') i--;
+    const completeSlides = [];
+    let depth = 0;
+    let objStart = -1;
+    let inStr = false;
+    let esc = false;
 
-    if (i <= arrStart) throw new Error('No complete slide found in truncated response');
+    for (let j = arrStart + 1; j < cleaned.length; j++) {
+      const ch = cleaned[j];
+      if (esc) { esc = false; continue; }
+      if (ch === '\\' && inStr) { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === '{') { if (depth === 0) objStart = j; depth++; }
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0 && objStart !== -1) {
+          try { completeSlides.push(JSON.parse(cleaned.slice(objStart, j + 1))); } catch (_2) {}
+          objStart = -1;
+        }
+      }
+    }
 
-    const recovered = `${cleaned.slice(0, i + 1)}],"interactive_quizzes":[]}`;
-    return JSON.parse(recovered);
+    if (completeSlides.length === 0) throw new Error('no complete slides recovered');
+    console.warn(`Slide JSON truncated — recovered ${completeSlides.length} complete slide(s)`);
+    return { slides: completeSlides, interactive_quizzes: [] };
+  } catch (err2) {
+    throw new Error('Failed to parse slide generation response: ' + err2.message);
   }
 }
 

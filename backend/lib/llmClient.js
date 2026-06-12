@@ -25,7 +25,7 @@ function createLlmCaller({
     const completion = await groq.chat.completions.create({
       messages: [{ role: 'user', content: prompt }],
       model: model || 'llama-3.3-70b-versatile',
-      max_tokens: 6000,
+      max_tokens: 8000,
     });
     return completion.choices[0]?.message?.content || '{}';
   }
@@ -51,7 +51,7 @@ function createLlmCaller({
     const currentModel = getNextGeminiModel(modelName || 'gemini-2.5-flash');
     const result = await currentModel.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 6000 },
+      generationConfig: { maxOutputTokens: 8000 },
     });
     return result.response.text();
   }
