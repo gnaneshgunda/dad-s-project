@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
 
@@ -9,12 +10,9 @@ function getSupabase() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_KEY;
   if (!url || !key) return null;
-  // Disable Realtime transport — storage uses plain HTTPS and never needs
-  // WebSocket. Without this, @supabase/supabase-js throws a Node.js <22
-  // WebSocket compatibility error even on Node 22 due to package version
-  // detection bugs, crashing unrelated operations like video uploads.
+  // Pass ws explicitly so Supabase Realtime works on Node < 22
   supabase = createClient(url, key, {
-    realtime: { transport: null },
+    realtime: { transport: WebSocket },
     global: { fetch: globalThis.fetch },
   });
   return supabase;
