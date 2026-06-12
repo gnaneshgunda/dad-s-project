@@ -41,11 +41,14 @@ export default function Course() {
   useEffect(() => { loadCourse(); }, [loadCourse]);
 
   useEffect(() => {
-    const completed = jobs.find((j) => j.status === 'completed' && j.subjectId === Number(id));
-    if (completed) {
+    const relevant = jobs.filter((j) => j.subjectId === Number(id));
+    if (relevant.some((j) => j.status === 'completed' || j.status === 'failed')) {
       loadCourse();
     }
   }, [jobs, id, loadCourse]);
+
+  const jobForChapter = (chapterId) =>
+    jobs.find((j) => j.chapterId === chapterId && (j.status === 'pending' || j.status === 'running'));
 
   const startGenerate = async (chapter, regenerate) => {
     try {
@@ -118,8 +121,8 @@ export default function Course() {
 
   return (
     <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto space-y-6">
-      <Link to="/library" className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800">
-        <ChevronLeft className="h-4 w-4" /> Back to Library
+      <Link to="/courses" className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800">
+        <ChevronLeft className="h-4 w-4" /> Back to My Courses
       </Link>
 
       <div className="card p-6">
@@ -158,6 +161,8 @@ export default function Course() {
         {course.chapters.map((chapter, idx) => {
           const hasVideo = chapter.videos?.length > 0;
           const generating = isGenerating(chapter.id);
+          const job = jobForChapter(chapter.id);
+          const percent = job?.progressData?.percent;
           return (
             <div
               key={chapter.id}
@@ -173,6 +178,17 @@ export default function Course() {
                   <p className="font-medium text-slate-900 truncate">{chapter.name}</p>
                   {chapter.description && (
                     <p className="text-xs text-slate-400 truncate">{chapter.description}</p>
+                  )}
+                  {generating && (
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <div className="flex-1 h-1 bg-slate-200 rounded-full overflow-hidden max-w-[140px]">
+                        <div
+                          className="h-full bg-indigo-500 rounded-full transition-all"
+                          style={{ width: `${Math.max(percent ?? 5, 5)}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-indigo-600">{percent != null ? `${percent}%` : 'Starting…'}</span>
+                    </div>
                   )}
                 </div>
                 {hasVideo && <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0 hidden sm:block" />}

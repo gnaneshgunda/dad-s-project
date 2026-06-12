@@ -5,7 +5,7 @@ const GenerationContext = createContext(null);
 
 export function GenerationProvider({ children }) {
   const [jobs, setJobs] = useState([]);
-  const pollRef = useRef(null);
+  const hasActiveRef = useRef(false);
 
   const pollJobs = useCallback(async () => {
     const token = localStorage.getItem('token');
@@ -13,28 +13,34 @@ export function GenerationProvider({ children }) {
 
     try {
       const activeRes = await api.get('/api/generation-jobs');
-      const active = activeRes.data || [];
-      setJobs((prev) => {
-        const map = new Map(prev.map((j) => [j.id, j]));
-        active.forEach((j) => map.set(j.id, { ...map.get(j.id), ...j }));
-        return Array.from(map.values()).filter((j) => j.status === 'pending' || j.status === 'running' || j.status === 'completed');
-      });
+      const incoming = activeRes.data || [];
+      hasActiveRef.current = incoming.some((j) => j.status === 'pending' || j.status === 'running');
 
-      for (const job of active) {
-        if (job.status === 'pending' || job.status === 'running') {
-          const detail = await api.get(`/api/generation-jobs/${job.id}`);
-          setJobs((prev) => prev.map((j) => (j.id === job.id ? { ...j, ...detail.data } : j)));
-        }
-      }
+      setJobs((prev) => {
+        const map = new Map();
+        prev.forEach((j) => map.set(j.id, j));
+        incoming.forEach((j) => map.set(j.id, { ...map.get(j.id), ...j }));
+        return Array.from(map.values())
+          .filter((j) => {
+            if (j.status === 'pending' || j.status === 'running') return true;
+            if (j.status === 'completed' || j.status === 'failed') {
+              const updated = j.updatedAt ? new Date(j.updatedAt).getTime() : Date.now();
+              return Date.now() - updated < 3 * 60 * 1000;
+            }
+            return false;
+          })
+          .sort((a, b) => b.id - a.id);
+      });
     } catch {
-      // ignore poll errors
+      // backend may be offline — don't spam
     }
   }, []);
 
   const trackJob = useCallback((jobId, meta = {}) => {
+    hasActiveRef.current = true;
     setJobs((prev) => {
       if (prev.find((j) => j.id === jobId)) return prev;
-      return [{ id: jobId, status: 'pending', ...meta }, ...prev];
+      return [{ id: jobId, status: 'pending', progressData: { step: 'queued', percent: 0 }, ...meta }, ...prev];
     });
     pollJobs();
   }, [pollJobs]);
@@ -44,9 +50,21 @@ export function GenerationProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    pollJobs();
-    pollRef.current = setInterval(pollJobs, 4000);
-    return () => clearInterval(pollRef.current);
+    let cancelled = false;
+    let timer;
+
+    const tick = async () => {
+      await pollJobs();
+      if (!cancelled) {
+        timer = setTimeout(tick, hasActiveRef.current ? 2500 : 12000);
+      }
+    };
+
+    tick();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [pollJobs]);
 
   return (

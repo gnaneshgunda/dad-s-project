@@ -235,6 +235,50 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
     }
   });
 
+  router.get('/courses/mine', authMiddleware, async (req, res) => {
+    try {
+      const subjects = await db.subject.findMany({
+        where: { userId: req.user.id },
+        include: {
+          chapters: {
+            orderBy: { sortOrder: 'asc' },
+            include: { videos: { take: 1, orderBy: { createdAt: 'desc' } } },
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      const courses = subjects.map((s) => {
+        const completed = s.chapters.filter((c) => c.videos.length > 0).length;
+        const pendingChapters = s.chapters.filter((c) => c.videos.length === 0);
+        return {
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          learningScope: s.learningScope,
+          isPublic: s.isPublic,
+          updatedAt: s.updatedAt,
+          progress: {
+            total: s.chapters.length,
+            completed,
+            percent: s.chapters.length ? Math.round((completed / s.chapters.length) * 100) : 0,
+          },
+          pendingCount: pendingChapters.length,
+          pendingChapters: pendingChapters.map((c) => ({
+            id: c.id,
+            name: c.name,
+            generationStatus: c.generationStatus,
+          })),
+        };
+      });
+
+      res.json(courses);
+    } catch (err) {
+      console.error('List courses error:', err);
+      res.status(500).json({ error: 'Failed to load courses' });
+    }
+  });
+
   router.get('/courses/:id', authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
     try {
@@ -345,6 +389,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
           promptType: promptType || 'explain-detailed',
           audioDir,
           videoDir,
+          callLlm,
           onProgress,
         });
 
@@ -395,16 +440,33 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
 
   router.get('/generation-jobs', authMiddleware, async (req, res) => {
     try {
+      const recentCutoff = new Date(Date.now() - 3 * 60 * 1000);
       const jobs = await db.generationJob.findMany({
         where: {
           userId: req.user.id,
-          status: { in: ['pending', 'running'] },
+          OR: [
+            { status: { in: ['pending', 'running'] } },
+            { status: { in: ['completed', 'failed'] }, updatedAt: { gte: recentCutoff } },
+          ],
+        },
+        include: {
+          chapter: {
+            select: {
+              id: true,
+              name: true,
+              subjectId: true,
+              subject: { select: { id: true, name: true } },
+            },
+          },
         },
         orderBy: { createdAt: 'desc' },
-        take: 10,
+        take: 15,
       });
       res.json(jobs.map((j) => ({
         ...j,
+        label: j.chapter?.name || j.chapter?.subject?.name || 'Video',
+        chapterId: j.chapterId || j.chapter?.id,
+        subjectId: j.subjectId || j.chapter?.subjectId,
         progressData: j.progress ? JSON.parse(j.progress) : null,
       })));
     } catch (err) {

@@ -3,6 +3,7 @@ import { Sparkles, Library, User, LogOut, LogIn, UserPlus, Globe, GraduationCap 
 
 const navLinks = [
   { to: '/', label: 'Studio', icon: Sparkles },
+  { to: '/courses', label: 'My Courses', icon: GraduationCap },
   { to: '/explore', label: 'Explore', icon: Globe },
   { to: '/library', label: 'Library', icon: Library },
   { to: '/profile', label: 'Profile', icon: User },

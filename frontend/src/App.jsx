@@ -8,6 +8,7 @@ import Signup from './pages/Signup';
 import Library from './pages/Library';
 import Profile from './pages/Profile';
 import Course from './pages/Course';
+import MyCourses from './pages/MyCourses';
 import Explore from './pages/Explore';
 import ExplorePreview from './pages/ExplorePreview';
 
@@ -31,6 +32,14 @@ function App() {
               element={
                 <PrivateRoute>
                   <Home />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/courses"
+              element={
+                <PrivateRoute>
+                  <MyCourses />
                 </PrivateRoute>
               }
             />
