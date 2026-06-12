@@ -60,11 +60,12 @@ export default function Course() {
       });
   }, [jobs, id, loadCourse]);
 
-  const selectChapter = useCallback(async (chapter) => {
+  const selectChapter = useCallback(async (chapter, selectedVideo = null) => {
     if (!chapter.videos?.length) return;
     setVideoLoading(true);
     setActiveChapterId(chapter.id);
-    const video = chapter.videos[0];
+    // If a specific video is provided use it, otherwise fallback to first video
+    const video = selectedVideo || chapter.videos[0];
     setActiveVideo(video);
     setActiveQuizzes([]);
     try {
@@ -207,6 +208,7 @@ export default function Course() {
 
       <div className="flex flex-1 min-h-0 flex-col lg:flex-row">
         {/* Playlist sidebar */}
+        {/* Playlist sidebar */}
         {sidebarOpen && !theaterMode && (
           <aside className="w-full lg:w-[30%] lg:max-w-sm border-b lg:border-b-0 lg:border-r border-slate-200 bg-white flex flex-col min-h-0 max-h-[38vh] lg:max-h-none shrink-0">
             <div className="p-3 border-b border-slate-100 flex items-center justify-between shrink-0">
@@ -224,9 +226,8 @@ export default function Course() {
                   <div
                     key={chapter.id}
                     ref={(el) => { lessonRefs.current[chapter.id] = el; }}
-                    className={`rounded-xl p-3 transition-colors ${
-                      isActive ? 'bg-indigo-50 border border-indigo-200' : 'hover:bg-slate-50 border border-transparent'
-                    }`}
+                    className={`rounded-xl p-3 transition-colors ${isActive ? 'bg-indigo-50 border border-indigo-200' : 'hover:bg-slate-50 border border-transparent'
+                      }`}
                   >
                     <div className="flex items-start gap-2">
                       <span className="w-6 h-6 rounded-md bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500 shrink-0 mt-0.5">
@@ -253,13 +254,19 @@ export default function Course() {
                     </div>
                     <div className="flex gap-1.5 mt-2 ml-8">
                       {hasVideo ? (
-                        <button
-                          type="button"
-                          onClick={() => { selectChapter(chapter); if (window.innerWidth < 640) setSidebarOpen(false); }}
-                          className="flex-1 text-xs py-1.5 px-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 flex items-center justify-center gap-1"
-                        >
-                          <Play className="h-3 w-3" /> Play
-                        </button>
+                        <div className="flex flex-col gap-1">
+                          {/* List each video in the chapter */}
+                          {chapter.videos.map((video) => (
+                            <button
+                              key={video.id}
+                              type="button"
+                              onClick={() => { selectChapter(chapter, video); if (window.innerWidth < 640) setSidebarOpen(false); }}
+                              className="flex-1 text-xs py-1.5 px-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 flex items-center justify-center gap-1"
+                            >
+                              <Play className="h-3 w-3" /> Play
+                            </button>
+                          ))}
+                        </div>
                       ) : (
                         <button
                           type="button"

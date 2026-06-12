@@ -59,7 +59,14 @@ app.use(express.json());
 app.get('/api/health', async (_req, res) => {
   try {
     await db.$queryRaw`SELECT 1`;
-    res.json({ status: 'ok', database: 'connected' });
+    const { getSupabase } = require('./lib/storage');
+    const sb = getSupabase();
+    let storage = 'not configured';
+    if (sb) {
+      const { data, error } = await sb.storage.listBuckets();
+      storage = error ? `error: ${error.message}` : `ok (${data.map(b => b.name).join(', ')})`;
+    }
+    res.json({ status: 'ok', database: 'connected', storage });
   } catch {
     res.status(503).json({ status: 'degraded', database: 'disconnected' });
   }

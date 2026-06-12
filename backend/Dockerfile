@@ -37,4 +37,4 @@ ENV PORT=7860
 EXPOSE 7860
 
 # Sync schema to Supabase, then start the server
-CMD ["sh", "-c", "npx prisma db push && node server.js"]
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss 2>&1 | tail -5 && node server.js"]

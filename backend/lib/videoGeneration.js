@@ -253,9 +253,13 @@ async function generateVideo({
       uploadAudio(combinedAudioFilePath, combinedAudioFilename),
     ]);
 
-    // Clean up local files once uploaded
-    if (publicVideoUrl) { try { fs.unlinkSync(videoFilePath); } catch { /* ignore */ } }
-    if (publicAudioUrl) { try { fs.unlinkSync(combinedAudioFilePath); } catch { /* ignore */ } }
+    // Clean up local files once uploaded only if upload succeeded
+    if (publicVideoUrl) {
+      try { fs.unlinkSync(videoFilePath); } catch { /* ignore */ }
+    }
+    if (publicAudioUrl) {
+      try { fs.unlinkSync(combinedAudioFilePath); } catch { /* ignore */ }
+    }
 
     return {
       videoUrl: publicVideoUrl || `/api/video/${videoFilename}`,
