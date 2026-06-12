@@ -13,6 +13,20 @@ function getSupabase() {
   return supabase;
 }
 
+async function ensureBuckets() {
+  const client = getSupabase();
+  if (!client) return;
+  const { data: buckets } = await client.storage.listBuckets();
+  const existing = new Set((buckets || []).map(b => b.name));
+  for (const name of ['videos', 'audio']) {
+    if (!existing.has(name)) {
+      const { error } = await client.storage.createBucket(name, { public: true });
+      if (error) console.error(`Failed to create bucket "${name}":`, error.message);
+      else console.log(`Storage bucket "${name}" created`);
+    }
+  }
+}
+
 // Returns public URL if uploaded, null if Supabase not configured (falls back to local)
 async function uploadFile(localPath, bucket, remoteName) {
   const client = getSupabase();
@@ -44,4 +58,4 @@ async function uploadAudio(localPath, filename) {
   return uploadFile(localPath, 'audio', filename);
 }
 
-module.exports = { uploadVideo, uploadAudio, getSupabase };
+module.exports = { uploadVideo, uploadAudio, getSupabase, ensureBuckets };

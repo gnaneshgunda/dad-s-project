@@ -22,6 +22,7 @@ const profileRoutes = require('./routes/profile');
 const progressRoutes = require('./routes/progress');
 const { resolveEdgeVoice, VOICES } = require('./lib/voices');
 const { generateVideo } = require('./lib/videoGeneration');
+const { ensureBuckets } = require('./lib/storage');
 const { createLlmCaller } = require('./lib/llmClient');
 const { getLanguageInstruction } = require('./lib/llmPrompts');
 const initCoursesRouter = require('./routes/courses');
@@ -490,6 +491,7 @@ async function startServer() {
     console.error('Run: npx prisma db push');
   }
 
+  await ensureBuckets().catch(err => console.error('Storage bucket setup failed:', err.message));
   const server = app.listen(port, '0.0.0.0', () => {
     console.log(`Server running on port ${port}`);
     console.log('Keep this terminal open while using the app.');

@@ -155,7 +155,7 @@ function InteractiveVideoPlayer({
   };
 
   const progress = duration ? (currentTime / duration) * 100 : 0;
-  const src = `${apiBaseUrl}${videoUrl}`;
+  const src = videoUrl.startsWith('http') ? videoUrl : `${apiBaseUrl}${videoUrl}`;
 
   return (
     <div className={`flex flex-col min-h-0 ${className}`}>
