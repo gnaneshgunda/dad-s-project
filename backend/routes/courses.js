@@ -92,7 +92,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
 
   router.post('/courses/plan', authMiddleware, async (req, res) => {
     const {
-      query, learningScope, isPublic, aiProvider, aiModel, promptType,
+      query, learningScope, isPublic, aiProvider, aiModel, promptType, language,
     } = req.body;
     if (!query?.trim()) return res.status(400).json({ error: 'query is required' });
 
@@ -118,6 +118,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
           description: curriculum.description || '',
           searchQuery,
           learningScope: scope,
+          language: language || 'en-US-AriaNeural',
           isPublic: Boolean(isPublic),
           curriculumJson: JSON.stringify(curriculum),
           userId: req.user.id,
@@ -302,6 +303,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
 
       res.json({
         ...subject,
+        language: subject.language || 'en-US-AriaNeural',
         chapters,
         curriculum: subject.curriculumJson ? JSON.parse(subject.curriculumJson) : null,
         progress: buildCourseProgress(subject.chapters, watchedSet),
@@ -313,7 +315,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
 
   router.patch('/courses/:id', authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
-    const { isPublic, name, description } = req.body;
+    const { isPublic, name, description, language } = req.body;
     try {
       const updated = await db.subject.updateMany({
         where: { id, userId: req.user.id },
@@ -321,6 +323,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
           ...(typeof isPublic === 'boolean' ? { isPublic } : {}),
           ...(name ? { name } : {}),
           ...(description !== undefined ? { description } : {}),
+          ...(language ? { language } : {}),
         },
       });
       if (updated.count === 0) return res.status(404).json({ error: 'Course not found' });
@@ -505,6 +508,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
           name: query.trim().substring(0, 100),
           searchQuery,
           learningScope: 'quick-lesson',
+          language: language || 'en-US-AriaNeural',
           isPublic: Boolean(isPublic),
           userId: req.user.id,
           chapters: {

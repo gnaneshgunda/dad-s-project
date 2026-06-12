@@ -11,8 +11,8 @@ const baseUrl = process.env.DATABASE_URL || '';
 const sep = baseUrl.includes('?') ? '&' : '?';
 const isPgBouncer = baseUrl.includes('pgbouncer=true');
 const datasourceUrl = baseUrl + sep + (isPgBouncer
-  ? 'connection_limit=1&pool_timeout=20'
-  : 'connection_limit=10&pool_timeout=20');
+  ? 'connection_limit=1&pool_timeout=60'
+  : 'connection_limit=10&pool_timeout=60');
 
 const prisma = globalForPrisma.prisma ?? new PrismaClient({
   log: process.env.PRISMA_LOG === '1' ? ['query', 'error'] : ['error'],

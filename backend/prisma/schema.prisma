@@ -25,6 +25,7 @@ model Subject {
   name            String
   description     String?
   searchQuery     String?
+  language        String    @default("en-US-AriaNeural")
   learningScope   String    @default("quick-lesson")
   isPublic        Boolean   @default(false)
   curriculumJson  String?   @db.Text

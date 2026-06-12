@@ -10,7 +10,6 @@ router.get('/profile', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Single DB connection for all reads — avoids Supabase session-pool exhaustion.
     const [
       user,
       ownedSubjects,
@@ -20,7 +19,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
       watchedProgress,
       publicCourses,
       historyCount,
-    ] = await db.$transaction([
+    ] = await Promise.all([
       db.user.findUnique({
         where: { id: userId },
         select: { id: true, email: true, name: true, createdAt: true },
@@ -71,7 +70,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
     let videoCount = 0;
 
     if (ownedIds.length > 0) {
-      [courseAdopters, chapterCount, videoCount] = await db.$transaction([
+      [courseAdopters, chapterCount, videoCount] = await Promise.all([
         db.subject.count({ where: { sourceSubjectId: { in: ownedIds } } }),
         db.chapter.count({ where: { subjectId: { in: ownedIds } } }),
         db.video.count({ where: { chapter: { subjectId: { in: ownedIds } } } }),

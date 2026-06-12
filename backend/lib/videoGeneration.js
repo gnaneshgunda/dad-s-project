@@ -39,19 +39,20 @@ async function generateAudioFile(text, voice, filepath) {
         console.warn(`TTS attempt ${attempt + 1} failed for voice "${voice}", retrying in 1s...`);
         await new Promise((r) => setTimeout(r, 1000));
       } else {
-        // All retries exhausted — generate a 2-second silence file so the
-        // video can still be produced (better a silent slide than a crash)
-        console.warn(`TTS failed after ${MAX_RETRIES + 1} attempts — generating silence fallback`);
-        await new Promise((resolve, reject) => {
-          ffmpeg()
-            .input('anullsrc=r=24000:cl=mono')
-            .inputFormat('lavfi')
-            .duration(2)
-            .outputOptions(['-c:a', 'libmp3lame', '-b:a', '48k'])
-            .save(filepath)
-            .on('end', resolve)
-            .on('error', reject);
-        });
+        // All retries exhausted — write a minimal valid silent MP3 so the
+        // video can still be produced (better a silent slide than a crash).
+        // This is a valid MPEG1 Layer3 silence frame repeated for ~2 seconds.
+        console.warn(`TTS failed after ${MAX_RETRIES + 1} attempts — writing silence fallback`);
+        const silenceFrame = Buffer.from(
+          'fffbe0640000000000000000000000000000000000000000000000000000000000000000' +
+          '00000000000000000000000000000000000000000000000000000000000000000000Info' +
+          '00000000000000000000000000000000',
+          'hex'
+        );
+        // Repeat the frame ~75 times ≈ 2 seconds of silence at 128kbps
+        const frames = [];
+        for (let k = 0; k < 75; k++) frames.push(silenceFrame);
+        fs.writeFileSync(filepath, Buffer.concat(frames));
       }
     }
   }
