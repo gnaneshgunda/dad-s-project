@@ -446,6 +446,27 @@ export default function Home() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Output Format</label>
+              <div className="flex gap-2">
+                {[{ v: 'audio', l: 'Audio Only' }, { v: 'video', l: 'Video + Quizzes' }].map(({ v, l }) => (
+                  <button key={v} type="button" onClick={() => setOutputType(v)} className={`flex-1 py-3 px-4 rounded-xl text-sm font-medium border transition-all ${outputType === v ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
+                <Mic className="h-4 w-4 text-indigo-500" /> Narrator Voice (Edge TTS)
+              </label>
+              <select value={audioLanguage} onChange={(e) => setAudioLanguage(e.target.value)} className="input-field py-2.5">
+                {voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">Content Style</label>
               <div className="space-y-2">
                 {PROMPT_TYPES.map((p) => (
@@ -497,27 +518,6 @@ export default function Home() {
             <button type="button" onClick={() => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([expandedText])); a.download = 'lesson.txt'; a.click(); }} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1">
               <Download className="h-4 w-4" /> Download text
             </button>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Output Format</label>
-                <div className="flex gap-2">
-                  {[{ v: 'audio', l: 'Audio Only' }, { v: 'video', l: 'Video + Quizzes' }].map(({ v, l }) => (
-                    <button key={v} type="button" onClick={() => setOutputType(v)} className={`flex-1 py-3 px-4 rounded-xl text-sm font-medium border transition-all ${outputType === v ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                      {l}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
-                  <Mic className="h-4 w-4 text-indigo-500" /> Voice (Edge TTS)
-                </label>
-                <select value={audioLanguage} onChange={(e) => setAudioLanguage(e.target.value)} className="input-field py-2.5">
-                  {voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-                </select>
-              </div>
-            </div>
 
             {outputType === 'video' && (
               <button type="button" onClick={() => setConfirmQuick(true)} disabled={isGeneratingMedia} className="btn-primary w-full">

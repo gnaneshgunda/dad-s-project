@@ -19,6 +19,7 @@ const db = require('./db/index');
 const authMiddleware = require('./middleware/auth');
 const libraryRoutes = require('./routes/library');
 const profileRoutes = require('./routes/profile');
+const progressRoutes = require('./routes/progress');
 const { resolveEdgeVoice, VOICES } = require('./lib/voices');
 const { generateVideo } = require('./lib/videoGeneration');
 const { createLlmCaller } = require('./lib/llmClient');
@@ -64,6 +65,7 @@ app.get('/api/health', async (_req, res) => {
 });
 app.use('/api', libraryRoutes);
 app.use('/api', profileRoutes);
+app.use('/api', progressRoutes);
 
 // Manage multiple API keys for Gemini
 const geminiApiKeys = process.env.GEMINI_API_KEYS ? process.env.GEMINI_API_KEYS.split(',') : (process.env.GEMINI_API_KEY ? [process.env.GEMINI_API_KEY] : []);

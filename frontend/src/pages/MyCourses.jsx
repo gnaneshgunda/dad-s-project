@@ -7,6 +7,7 @@ import api from '../lib/api';
 import ConfirmModal from '../components/ConfirmModal';
 import { useGeneration } from '../context/GenerationContext';
 import Toast from '../components/Toast';
+import DualProgressBar from '../components/DualProgressBar';
 
 export default function MyCourses() {
   const { jobs, trackJob } = useGeneration();
@@ -105,7 +106,7 @@ export default function MyCourses() {
                     </div>
                     <h2 className="font-bold text-slate-900 mt-1 truncate">{course.name}</h2>
                     <p className="text-xs text-slate-400 mt-1">
-                      {course.progress.completed}/{course.progress.total} lessons ready
+                      {course.progress.generated} generated · {course.progress.watched} watched
                       {course.pendingCount > 0 && ` · ${course.pendingCount} pending`}
                     </p>
                   </div>
@@ -117,11 +118,8 @@ export default function MyCourses() {
                   </Link>
                 </div>
 
-                <div className="mt-3 h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full transition-all"
-                    style={{ width: `${course.progress.percent}%` }}
-                  />
+                <div className="mt-3">
+                  <DualProgressBar progress={course.progress} compact />
                 </div>
               </div>
 
@@ -166,7 +164,7 @@ export default function MyCourses() {
                 </div>
               )}
 
-              {course.progress.percent === 100 && (
+              {course.progress.generatedPercent === 100 && (
                 <div className="border-t border-emerald-100 px-5 py-3 bg-emerald-50/50 flex items-center gap-2 text-sm text-emerald-700">
                   <Play className="h-4 w-4" />
                   All lessons ready —

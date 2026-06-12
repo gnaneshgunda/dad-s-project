@@ -9,6 +9,7 @@ const {
 } = require('../lib/llmPrompts');
 const { normalizeSearchQuery, flattenCurriculumLessons } = require('../lib/courseUtils');
 const { createJob, startBackgroundJob } = require('../lib/generationJobs');
+const { getWatchedChapterIds, buildCourseProgress } = require('../lib/progressUtils');
 
 const router = express.Router();
 
@@ -248,8 +249,10 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
         orderBy: { updatedAt: 'desc' },
       });
 
+      const allChapterIds = subjects.flatMap((s) => s.chapters.map((c) => c.id));
+      const watchedSet = await getWatchedChapterIds(db, req.user.id, allChapterIds);
+
       const courses = subjects.map((s) => {
-        const completed = s.chapters.filter((c) => c.videos.length > 0).length;
         const pendingChapters = s.chapters.filter((c) => c.videos.length === 0);
         return {
           id: s.id,
@@ -258,11 +261,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
           learningScope: s.learningScope,
           isPublic: s.isPublic,
           updatedAt: s.updatedAt,
-          progress: {
-            total: s.chapters.length,
-            completed,
-            percent: s.chapters.length ? Math.round((completed / s.chapters.length) * 100) : 0,
-          },
+          progress: buildCourseProgress(s.chapters, watchedSet),
           pendingCount: pendingChapters.length,
           pendingChapters: pendingChapters.map((c) => ({
             id: c.id,
@@ -293,15 +292,19 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
       });
       if (!subject) return res.status(404).json({ error: 'Course not found' });
 
-      const completed = subject.chapters.filter((c) => c.videos.length > 0).length;
+      const chapterIds = subject.chapters.map((c) => c.id);
+      const watchedSet = await getWatchedChapterIds(db, req.user.id, chapterIds);
+      const chapters = subject.chapters.map((c) => ({
+        ...c,
+        watched: watchedSet.has(c.id),
+        hasVideo: c.videos.length > 0,
+      }));
+
       res.json({
         ...subject,
+        chapters,
         curriculum: subject.curriculumJson ? JSON.parse(subject.curriculumJson) : null,
-        progress: {
-          total: subject.chapters.length,
-          completed,
-          percent: subject.chapters.length ? Math.round((completed / subject.chapters.length) * 100) : 0,
-        },
+        progress: buildCourseProgress(subject.chapters, watchedSet),
       });
     } catch (err) {
       res.status(500).json({ error: 'Failed to load course' });

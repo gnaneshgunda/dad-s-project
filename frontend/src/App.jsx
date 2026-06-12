@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import GenerationBanner from './components/GenerationBanner';
 import { GenerationProvider } from './context/GenerationContext';
@@ -11,20 +11,22 @@ import Course from './pages/Course';
 import MyCourses from './pages/MyCourses';
 import Explore from './pages/Explore';
 import ExplorePreview from './pages/ExplorePreview';
+import About from './pages/About';
 
 function PrivateRoute({ children }) {
   const token = localStorage.getItem('token');
   return token ? children : <Navigate to="/login" />;
 }
 
-function App() {
+function AppShell() {
+  const location = useLocation();
+  const immersive = location.pathname.startsWith('/course/');
+
   return (
-    <Router>
-      <GenerationProvider>
-      <div className="min-h-screen flex flex-col">
-        <Navbar />
-        <main className="flex-1 sm:pb-0 pb-16">
-          <Routes>
+    <div className="min-h-screen flex flex-col">
+      <Navbar />
+      <main className={immersive ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 sm:pb-0 pb-16'}>
+        <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route
@@ -83,14 +85,23 @@ function App() {
                 </PrivateRoute>
               }
             />
+            <Route path="/about" element={<About />} />
             <Route
               path="/history"
               element={<Navigate to="/library" replace />}
             />
-          </Routes>
-        </main>
-        <GenerationBanner />
-      </div>
+        </Routes>
+      </main>
+      <GenerationBanner />
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <Router>
+      <GenerationProvider>
+        <AppShell />
       </GenerationProvider>
     </Router>
   );

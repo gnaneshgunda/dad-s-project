@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Loader2, User, Mail, Calendar, Lock, Video, ChevronRight, Save, BookOpen, Globe } from 'lucide-react';
+import { Loader2, User, Mail, Calendar, Lock, Video, ChevronRight, Save, BookOpen, Globe, Users } from 'lucide-react';
 import api from '../lib/api';
 import Toast from '../components/Toast';
+import DualProgressBar from '../components/DualProgressBar';
 
 function getInitials(email, name) {
   if (name?.trim()) {
@@ -114,9 +115,9 @@ export default function Profile() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
               { label: 'Courses', value: stats.subjects },
-              { label: 'Lessons', value: stats.chapters },
-              { label: 'Videos', value: stats.videos },
-              { label: 'Public', value: stats.publicCourses },
+              { label: 'Lessons watched', value: stats.lessonsWatched ?? 0 },
+              { label: 'Course adopters', value: stats.courseAdopters ?? 0 },
+              { label: 'Public courses', value: stats.publicCourses },
             ].map((s) => (
               <div key={s.label} className="bg-white rounded-2xl border border-slate-100 p-5 text-center">
                 <p className="text-3xl font-bold text-indigo-600">{s.value}</p>
@@ -197,24 +198,30 @@ export default function Profile() {
           </div>
         )}
 
+        {(stats?.courseAdopters ?? 0) > 0 && (
+          <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-5 flex items-center gap-3">
+            <Users className="h-8 w-8 text-indigo-600 shrink-0" />
+            <div>
+              <p className="font-semibold text-indigo-900">{stats.courseAdopters} people using your courses</p>
+              <p className="text-sm text-indigo-700">Others copied or forked your public course plans.</p>
+            </div>
+          </div>
+        )}
+
         {courseProgress?.length > 0 && (
           <div className="bg-white rounded-2xl border border-slate-100 p-6">
-            <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+            <h3 className="font-semibold text-slate-900 mb-1 flex items-center gap-2">
               <BookOpen className="h-5 w-5 text-indigo-500" /> My Learning Progress
             </h3>
-            <div className="space-y-3">
+            <p className="text-xs text-slate-400 mb-4">Generated = videos created · Watched = lessons you completed</p>
+            <div className="space-y-4">
               {courseProgress.map((c) => (
                 <Link key={c.id} to={`/course/${c.id}`} className="block p-4 rounded-xl bg-slate-50 hover:bg-indigo-50 transition-colors">
-                  <div className="flex justify-between items-center mb-2">
+                  <div className="flex justify-between items-center mb-3">
                     <span className="font-medium text-slate-800">{c.name}</span>
-                    <span className="text-xs text-slate-400 flex items-center gap-1">
-                      {c.isPublic && <Globe className="h-3 w-3" />}
-                      {c.completed}/{c.total}
-                    </span>
+                    {c.isPublic && <Globe className="h-3.5 w-3.5 text-emerald-500" />}
                   </div>
-                  <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
-                    <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${c.percent}%` }} />
-                  </div>
+                  <DualProgressBar progress={c.progress} compact />
                 </Link>
               ))}
             </div>

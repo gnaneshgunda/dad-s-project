@@ -9,14 +9,15 @@ datasource db {
 }
 
 model User {
-  id             Int             @id @default(autoincrement())
-  email          String          @unique
+  id             Int              @id @default(autoincrement())
+  email          String           @unique
   password       String
   name           String?
-  createdAt      DateTime        @default(now())
+  createdAt      DateTime         @default(now())
   subjects       Subject[]
   history        History[]
   generationJobs GenerationJob[]
+  lessonProgress LessonProgress[]
 }
 
 model Subject {
@@ -51,8 +52,22 @@ model Chapter {
   subject          Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   videos           Video[]
   generationJobs   GenerationJob[]
+  lessonProgress   LessonProgress[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+}
+
+model LessonProgress {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chapterId   Int
+  chapter     Chapter   @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, chapterId])
 }
 
 model Video {

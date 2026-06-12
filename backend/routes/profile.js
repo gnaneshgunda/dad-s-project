@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const db = require('../db/index');
 const authMiddleware = require('../middleware/auth');
+const { getWatchedChapterIds, buildCourseProgress } = require('../lib/progressUtils');
 
 const router = express.Router();
 
@@ -23,7 +24,13 @@ router.get('/profile', authMiddleware, async (req, res) => {
       db.history.count({ where: { userId: req.user.id } }),
     ]);
 
-    const [recentVideos, courses, publicCourses, activeJobs] = await Promise.all([
+    const ownedSubjectIds = await db.subject.findMany({
+      where: { userId: req.user.id },
+      select: { id: true },
+    });
+    const ownedIds = ownedSubjectIds.map((s) => s.id);
+
+    const [recentVideos, courses, publicCourses, activeJobs, courseAdopters] = await Promise.all([
       db.video.findMany({
         where: { chapter: { subject: { userId: req.user.id } } },
         orderBy: { createdAt: 'desc' },
@@ -49,21 +56,21 @@ router.get('/profile', authMiddleware, async (req, res) => {
         orderBy: { createdAt: 'desc' },
         take: 5,
       }),
+      ownedIds.length > 0
+        ? db.subject.count({ where: { sourceSubjectId: { in: ownedIds } } })
+        : Promise.resolve(0),
     ]);
 
-    const courseProgress = courses.map((c) => {
-      const total = c.chapters.length;
-      const completed = c.chapters.filter((ch) => ch.videos.length > 0).length;
-      return {
-        id: c.id,
-        name: c.name,
-        learningScope: c.learningScope,
-        isPublic: c.isPublic,
-        total,
-        completed,
-        percent: total ? Math.round((completed / total) * 100) : 0,
-      };
-    });
+    const allChapterIds = courses.flatMap((c) => c.chapters.map((ch) => ch.id));
+    const watchedSet = await getWatchedChapterIds(db, req.user.id, allChapterIds);
+
+    const courseProgress = courses.map((c) => ({
+      id: c.id,
+      name: c.name,
+      learningScope: c.learningScope,
+      isPublic: c.isPublic,
+      progress: buildCourseProgress(c.chapters, watchedSet),
+    }));
 
     res.json({
       user,
@@ -73,6 +80,8 @@ router.get('/profile', authMiddleware, async (req, res) => {
         videos: videoCount,
         historyItems: historyCount,
         publicCourses,
+        courseAdopters,
+        lessonsWatched: watchedSet.size,
       },
       recentVideos,
       courseProgress,

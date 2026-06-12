@@ -1,38 +1,41 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import {
-  Loader2, ChevronLeft, Play, RefreshCw, Lock, Globe, CheckCircle2, Video,
+  Loader2, ChevronLeft, Play, RefreshCw, Lock, Globe, Video,
+  PanelLeft, PanelLeftClose, Maximize2, Minimize2, Eye,
 } from 'lucide-react';
 import api from '../lib/api';
 import { API_BASE_URL } from '../lib/config';
 import ConfirmModal from '../components/ConfirmModal';
 import InteractiveVideoPlayer from '../components/InteractiveVideoPlayer';
+import DualProgressBar from '../components/DualProgressBar';
 import { useGeneration } from '../context/GenerationContext';
 import Toast from '../components/Toast';
 
 export default function Course() {
   const { id } = useParams();
-  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const highlightChapterId = searchParams.get('chapter');
   const { trackJob, jobs } = useGeneration();
   const [course, setCourse] = useState(null);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
+  const [activeChapterId, setActiveChapterId] = useState(null);
   const [activeVideo, setActiveVideo] = useState(null);
   const [activeQuizzes, setActiveQuizzes] = useState([]);
   const [confirm, setConfirm] = useState(null);
-  const [genSettings, setGenSettings] = useState({
-    aiProvider: 'groq',
-    aiModel: 'llama-3.3-70b-versatile',
-    language: 'en-US-AriaNeural',
-    promptType: 'explain-detailed',
-  });
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [theaterMode, setTheaterMode] = useState(false);
+  const lessonRefs = useRef({});
 
   const loadCourse = useCallback(async () => {
     try {
       const res = await api.get(`/api/courses/${id}`);
       setCourse(res.data);
+      return res.data;
     } catch {
       setToast({ message: 'Failed to load course', type: 'error' });
+      return null;
     } finally {
       setLoading(false);
     }
@@ -47,23 +50,57 @@ export default function Course() {
     }
   }, [jobs, id, loadCourse]);
 
+  const selectChapter = useCallback(async (chapter) => {
+    if (!chapter.videos?.length) return;
+    setActiveChapterId(chapter.id);
+    const video = chapter.videos[0];
+    setActiveVideo(video);
+    try {
+      const res = await api.get(`/api/videos/${video.id}`);
+      setActiveQuizzes(res.data.interactiveQuizzes || []);
+    } catch {
+      setActiveQuizzes([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!course?.chapters?.length) return;
+    const targetId = highlightChapterId ? Number(highlightChapterId) : null;
+    const target = targetId
+      ? course.chapters.find((c) => c.id === targetId && c.videos?.length)
+      : course.chapters.find((c) => c.videos?.length);
+    if (target && activeChapterId !== target.id) {
+      selectChapter(target);
+    }
+    if (targetId && lessonRefs.current[targetId]) {
+      lessonRefs.current[targetId].scrollIntoView({ block: 'nearest' });
+    }
+  }, [course, highlightChapterId, selectChapter, activeChapterId]);
+
   const jobForChapter = (chapterId) =>
     jobs.find((j) => j.chapterId === chapterId && (j.status === 'pending' || j.status === 'running'));
+
+  const isGenerating = (chapterId) =>
+    jobs.some((j) => j.chapterId === chapterId && (j.status === 'pending' || j.status === 'running'))
+    || course?.chapters.find((c) => c.id === chapterId)?.generationStatus === 'generating';
 
   const startGenerate = async (chapter, regenerate) => {
     try {
       const res = await api.post(`/api/chapters/${chapter.id}/generate`, {
         confirmed: true,
         regenerate,
-        ...genSettings,
+        aiProvider: 'groq',
+        aiModel: 'llama-3.3-70b-versatile',
+        language: 'en-US-AriaNeural',
+        promptType: 'explain-detailed',
         expandedText: chapter.topicQuery || chapter.name,
       });
       trackJob(res.data.jobId, {
-        label: `${chapter.name}`,
+        label: chapter.name,
         chapterId: chapter.id,
         subjectId: Number(id),
       });
-      setToast({ message: `Generating "${chapter.name}" in background...`, type: 'success' });
+      setToast({ message: `Generating "${chapter.name}" in background…`, type: 'success' });
       loadCourse();
     } catch (err) {
       setToast({ message: err.response?.data?.error || 'Failed to start', type: 'error' });
@@ -76,10 +113,32 @@ export default function Course() {
       chapter,
       title: hasVideo ? 'Regenerate this lesson?' : 'Generate this lesson?',
       message: hasVideo
-        ? `This will replace the existing video for "${chapter.name}". This cannot be undone.`
-        : `Start AI video generation for "${chapter.name}"? This runs in the background — you can switch tabs freely.`,
+        ? `Replace the existing video for "${chapter.name}"?`
+        : `Start AI video for "${chapter.name}"? Runs in background.`,
       regenerate: hasVideo,
     });
+  };
+
+  const markLessonComplete = async () => {
+    if (!activeChapterId) return;
+    try {
+      await api.post(`/api/progress/chapters/${activeChapterId}/complete`);
+      setCourse((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          chapters: prev.chapters.map((c) => (c.id === activeChapterId ? { ...c, watched: true } : c)),
+          progress: {
+            ...prev.progress,
+            watched: prev.chapters.filter((c) => c.id === activeChapterId || c.watched).length,
+            watchedPercent: prev.chapters.length
+              ? Math.round((prev.chapters.filter((c) => c.id === activeChapterId || c.watched).length / prev.chapters.length) * 100)
+              : 0,
+          },
+        };
+      });
+      loadCourse();
+    } catch { /* non-critical */ }
   };
 
   const togglePublic = async () => {
@@ -92,20 +151,9 @@ export default function Course() {
     }
   };
 
-  const playVideo = async (chapter) => {
-    const video = chapter.videos[0];
-    setActiveVideo(video);
-    try {
-      const res = await api.get(`/api/videos/${video.id}`);
-      setActiveQuizzes(res.data.interactiveQuizzes || []);
-    } catch {
-      setActiveQuizzes([]);
-    }
-  };
-
   if (loading) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center">
+      <div className="h-[calc(100dvh-4rem)] flex items-center justify-center">
         <Loader2 className="animate-spin h-8 w-8 text-indigo-600" />
       </div>
     );
@@ -115,121 +163,181 @@ export default function Course() {
     return <div className="text-center py-20 text-slate-500">Course not found</div>;
   }
 
-  const isGenerating = (chapterId) =>
-    jobs.some((j) => j.chapterId === chapterId && (j.status === 'pending' || j.status === 'running'))
-    || course.chapters.find((c) => c.id === chapterId)?.generationStatus === 'generating';
+  const activeChapter = course.chapters.find((c) => c.id === activeChapterId);
 
   return (
-    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto space-y-6">
-      <Link to="/courses" className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800">
-        <ChevronLeft className="h-4 w-4" /> Back to My Courses
-      </Link>
-
-      <div className="card p-6">
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-          <div>
-            <span className="text-xs font-semibold uppercase tracking-wide text-indigo-600">
-              {course.learningScope?.replace('-', ' ')}
-            </span>
-            <h1 className="text-2xl font-bold text-slate-900 mt-1">{course.name}</h1>
-            {course.description && <p className="text-slate-500 mt-2 text-sm">{course.description}</p>}
-          </div>
-          <button type="button" onClick={togglePublic} className="btn-secondary text-sm shrink-0">
-            {course.isPublic ? <><Globe className="h-4 w-4" /> Public</> : <><Lock className="h-4 w-4" /> Private</>}
-          </button>
-        </div>
-
-        <div className="mt-6">
-          <div className="flex justify-between text-sm mb-2">
-            <span className="text-slate-600">Progress</span>
-            <span className="font-medium text-indigo-600">{course.progress?.percent || 0}%</span>
-          </div>
-          <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full transition-all"
-              style={{ width: `${course.progress?.percent || 0}%` }}
-            />
-          </div>
-          <p className="text-xs text-slate-400 mt-1">
-            {course.progress?.completed || 0} of {course.progress?.total || 0} lessons generated
-          </p>
-        </div>
-      </div>
-
-      <div className="card p-6 space-y-3">
-        <h2 className="font-bold text-slate-900 mb-4">Lessons</h2>
-        {course.chapters.map((chapter, idx) => {
-          const hasVideo = chapter.videos?.length > 0;
-          const generating = isGenerating(chapter.id);
-          const job = jobForChapter(chapter.id);
-          const percent = job?.progressData?.percent;
-          return (
-            <div
-              key={chapter.id}
-              className={`flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-xl border transition-colors ${
-                hasVideo ? 'border-emerald-100 bg-emerald-50/30' : 'border-slate-100 bg-slate-50/50'
-              }`}
-            >
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <span className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-sm font-bold text-slate-500 shrink-0">
-                  {idx + 1}
-                </span>
-                <div className="min-w-0">
-                  <p className="font-medium text-slate-900 truncate">{chapter.name}</p>
-                  {chapter.description && (
-                    <p className="text-xs text-slate-400 truncate">{chapter.description}</p>
-                  )}
-                  {generating && (
-                    <div className="mt-1.5 flex items-center gap-2">
-                      <div className="flex-1 h-1 bg-slate-200 rounded-full overflow-hidden max-w-[140px]">
-                        <div
-                          className="h-full bg-indigo-500 rounded-full transition-all"
-                          style={{ width: `${Math.max(percent ?? 5, 5)}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-indigo-600">{percent != null ? `${percent}%` : 'Starting…'}</span>
-                    </div>
-                  )}
-                </div>
-                {hasVideo && <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0 hidden sm:block" />}
-              </div>
-
-              <div className="flex gap-2 shrink-0">
-                {hasVideo && (
-                  <button type="button" onClick={() => playVideo(chapter)} className="btn-secondary text-sm py-2">
-                    <Play className="h-4 w-4" /> Watch
-                  </button>
-                )}
-                <button
-                  type="button"
-                  disabled={generating}
-                  onClick={() => handleGenerateClick(chapter)}
-                  className="btn-primary text-sm py-2 disabled:opacity-50"
-                >
-                  {generating ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</>
-                  ) : hasVideo ? (
-                    <><RefreshCw className="h-4 w-4" /> Regenerate</>
-                  ) : (
-                    <><Video className="h-4 w-4" /> Generate</>
-                  )}
-                </button>
-              </div>
+    <div className={`flex flex-col bg-slate-50 ${theaterMode ? 'fixed inset-0 z-50 bg-black' : 'h-[calc(100dvh-4rem)] sm:h-[calc(100dvh-4rem)] pb-16 sm:pb-0'}`}>
+      {/* Header */}
+      {!theaterMode && (
+        <div className="shrink-0 border-b border-slate-200 bg-white px-3 sm:px-5 py-3">
+          <div className="flex items-center gap-3">
+            <Link to="/courses" className="text-slate-500 hover:text-indigo-600 shrink-0">
+              <ChevronLeft className="h-5 w-5" />
+            </Link>
+            <div className="flex-1 min-w-0">
+              <h1 className="font-bold text-slate-900 truncate text-sm sm:text-base">{course.name}</h1>
+              <p className="text-xs text-slate-400 hidden sm:block">{course.learningScope?.replace('-', ' ')}</p>
             </div>
-          );
-        })}
-      </div>
-
-      {activeVideo?.videoUrl && (
-        <div className="card p-6">
-          <h2 className="font-bold text-slate-900 mb-4">{activeVideo.title}</h2>
-          <InteractiveVideoPlayer
-            videoUrl={activeVideo.videoUrl}
-            interactiveQuizzes={activeQuizzes}
-            apiBaseUrl={API_BASE_URL}
-          />
+            <button type="button" onClick={() => setSidebarOpen((v) => !v)} className="lg:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-lg">
+              {sidebarOpen ? <PanelLeftClose className="h-5 w-5" /> : <PanelLeft className="h-5 w-5" />}
+            </button>
+            <button type="button" onClick={togglePublic} className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+              {course.isPublic ? <><Globe className="h-3.5 w-3.5" /> Public</> : <><Lock className="h-3.5 w-3.5" /> Private</>}
+            </button>
+          </div>
+          <div className="mt-3 max-w-xl">
+            <DualProgressBar progress={course.progress} compact />
+          </div>
         </div>
       )}
+
+      <div className="flex flex-1 min-h-0 flex-col lg:flex-row">
+        {/* Playlist sidebar */}
+        {sidebarOpen && !theaterMode && (
+          <aside className="w-full lg:w-[30%] lg:max-w-sm border-b lg:border-b-0 lg:border-r border-slate-200 bg-white flex flex-col min-h-0 max-h-[38vh] lg:max-h-none shrink-0">
+            <div className="p-3 border-b border-slate-100 flex items-center justify-between shrink-0">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Playlist</span>
+              <span className="text-xs text-slate-400">{course.chapters.length} lessons</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {course.chapters.map((chapter, idx) => {
+                const hasVideo = chapter.videos?.length > 0;
+                const generating = isGenerating(chapter.id);
+                const job = jobForChapter(chapter.id);
+                const percent = job?.progressData?.percent;
+                const isActive = activeChapterId === chapter.id;
+                return (
+                  <div
+                    key={chapter.id}
+                    ref={(el) => { lessonRefs.current[chapter.id] = el; }}
+                    className={`rounded-xl p-3 transition-colors ${
+                      isActive ? 'bg-indigo-50 border border-indigo-200' : 'hover:bg-slate-50 border border-transparent'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="w-6 h-6 rounded-md bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500 shrink-0 mt-0.5">
+                        {idx + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-800 line-clamp-2">{chapter.name}</p>
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {hasVideo && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">Generated</span>
+                          )}
+                          {chapter.watched && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 flex items-center gap-0.5">
+                              <Eye className="h-2.5 w-2.5" /> Watched
+                            </span>
+                          )}
+                          {generating && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
+                              {percent != null ? `${percent}%` : 'Generating…'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5 mt-2 ml-8">
+                      {hasVideo ? (
+                        <button
+                          type="button"
+                          onClick={() => { selectChapter(chapter); if (window.innerWidth < 640) setSidebarOpen(false); }}
+                          className="flex-1 text-xs py-1.5 px-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 flex items-center justify-center gap-1"
+                        >
+                          <Play className="h-3 w-3" /> Play
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={generating}
+                          onClick={() => handleGenerateClick(chapter)}
+                          className="flex-1 text-xs py-1.5 px-2 rounded-lg bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50 flex items-center justify-center gap-1"
+                        >
+                          {generating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Video className="h-3 w-3" />}
+                          Generate
+                        </button>
+                      )}
+                      {hasVideo && (
+                        <button
+                          type="button"
+                          disabled={generating}
+                          onClick={() => handleGenerateClick(chapter)}
+                          className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+                          title="Regenerate"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </aside>
+        )}
+
+        {/* Video area */}
+        <main className={`flex-1 flex flex-col min-h-0 min-w-0 ${theaterMode ? 'bg-black' : 'p-3 sm:p-4 lg:w-[70%]'}`}>
+          {theaterMode && (
+            <div className="absolute top-3 left-3 z-20 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setTheaterMode(false)}
+                className="p-2 rounded-lg bg-black/60 text-white hover:bg-black/80"
+              >
+                <Minimize2 className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          {!theaterMode && activeVideo && (
+            <div className="flex items-center justify-between mb-2 shrink-0">
+              <h2 className="font-semibold text-slate-900 text-sm sm:text-base truncate">{activeChapter?.name}</h2>
+              <button
+                type="button"
+                onClick={() => { setTheaterMode(true); setSidebarOpen(false); }}
+                className="p-2 rounded-lg text-slate-500 hover:bg-slate-200/80"
+                title="Theater mode"
+              >
+                <Maximize2 className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          {activeVideo?.videoUrl ? (
+            <InteractiveVideoPlayer
+              key={activeVideo.id}
+              videoUrl={activeVideo.videoUrl}
+              interactiveQuizzes={activeQuizzes}
+              apiBaseUrl={API_BASE_URL}
+              embedded
+              showHeader={false}
+              onLessonComplete={markLessonComplete}
+              className="flex-1 min-h-0"
+            />
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-white rounded-2xl border border-slate-100">
+              <Video className="h-12 w-12 text-slate-300 mb-4" />
+              <p className="text-slate-600 font-medium">No lesson selected</p>
+              <p className="text-sm text-slate-400 mt-1 max-w-sm">
+                Pick a lesson from the playlist or generate one to start watching.
+              </p>
+              {course.chapters.some((c) => !c.videos?.length) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const pending = course.chapters.find((c) => !c.videos?.length);
+                    if (pending) handleGenerateClick(pending);
+                  }}
+                  className="mt-4 btn-primary text-sm"
+                >
+                  Generate first lesson
+                </button>
+              )}
+            </div>
+          )}
+        </main>
+      </div>
 
       <ConfirmModal
         open={!!confirm}
