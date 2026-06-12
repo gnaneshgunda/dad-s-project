@@ -2,11 +2,21 @@ const { PrismaClient } = require('@prisma/client');
 
 const globalForPrisma = globalThis;
 
-// Supabase free tier allows ~20 direct connections.
-// PgBouncer pooler (port 6543) handles pooling server-side, so keep client pool small.
+// When using Supabase's PgBouncer pooler (port 6543, pgbouncer=true),
+// PgBouncer manages the server-side pool. Prisma only needs connection_limit=1
+// on its end — more connections here don't help and can cause socket hangs.
+// Do NOT append session-level params (e.g. statement_timeout) because
+// PgBouncer in transaction mode ignores them and may reject the connection.
+const baseUrl = process.env.DATABASE_URL || '';
+const sep = baseUrl.includes('?') ? '&' : '?';
+const isPgBouncer = baseUrl.includes('pgbouncer=true');
+const datasourceUrl = baseUrl + sep + (isPgBouncer
+  ? 'connection_limit=1&pool_timeout=20'
+  : 'connection_limit=10&pool_timeout=20');
+
 const prisma = globalForPrisma.prisma ?? new PrismaClient({
   log: process.env.PRISMA_LOG === '1' ? ['query', 'error'] : ['error'],
-  datasourceUrl: process.env.DATABASE_URL + (process.env.DATABASE_URL?.includes('?') ? '&connection_limit=15&pool_timeout=20' : '?connection_limit=15&pool_timeout=20'),
+  datasourceUrl,
 });
 
 globalForPrisma.prisma = prisma;

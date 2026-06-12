@@ -66,10 +66,16 @@ export default function Course() {
     setActiveChapterId(chapter.id);
     // If a specific video is provided use it, otherwise fallback to first video
     const video = selectedVideo || chapter.videos[0];
+    // Eagerly set the video from the sidebar object so the player swaps
+    // the source immediately; we'll overwrite with the full API object below.
     setActiveVideo(video);
     setActiveQuizzes([]);
     try {
+      // Fetch the full video record — this guarantees a fresh videoUrl and
+      // also gives us the interactive quizzes in one round-trip.
       const res = await api.get(`/api/videos/${video.id}`);
+      // Overwrite with the API's full video object (has videoUrl, etc.)
+      setActiveVideo(res.data);
       setActiveQuizzes(res.data.interactiveQuizzes || []);
     } catch {
       setActiveQuizzes([]);
@@ -84,13 +90,17 @@ export default function Course() {
     const target = targetId
       ? course.chapters.find((c) => c.id === targetId && c.videos?.length)
       : course.chapters.find((c) => c.videos?.length);
-    if (target && activeChapterId !== target.id) {
+    // Only auto-select a chapter when nothing is active yet.
+    // Without the `!activeVideo` guard, every loadCourse() refresh would
+    // re-trigger this effect and silently reset the player back to the
+    // first chapter, overwriting whatever the user clicked.
+    if (target && !activeVideo && activeChapterId !== target.id) {
       selectChapter(target);
     }
     if (targetId && lessonRefs.current[targetId]) {
       lessonRefs.current[targetId].scrollIntoView({ block: 'nearest' });
     }
-  }, [course, highlightChapterId, selectChapter, activeChapterId]);
+  }, [course, highlightChapterId, selectChapter, activeChapterId, activeVideo]);
 
   const jobForChapter = (chapterId) =>
     jobs.find((j) => j.chapterId === chapterId && (j.status === 'pending' || j.status === 'running'));
