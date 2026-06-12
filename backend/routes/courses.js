@@ -8,7 +8,7 @@ const {
   parseScopeResponse,
 } = require('../lib/llmPrompts');
 const { normalizeSearchQuery, flattenCurriculumLessons } = require('../lib/courseUtils');
-const { createJob, startBackgroundJob } = require('../lib/generationJobs');
+const { createJob, startBackgroundJob, cancelJob } = require('../lib/generationJobs');
 const { getWatchedChapterIds, buildCourseProgress } = require('../lib/progressUtils');
 
 const router = express.Router();
@@ -381,7 +381,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
 
       const topicText = expandedText || chapter.topicQuery || chapter.name;
 
-      startBackgroundJob(job.id, async (onProgress) => {
+      startBackgroundJob(job.id, async (onProgress, isCancelled) => {
         onProgress('blueprint', 15);
         const result = await generateVideo({
           text: topicText,
@@ -394,6 +394,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
           videoDir,
           callLlm,
           onProgress,
+          isCancelled,
         });
 
         onProgress('saving', 95);
@@ -477,6 +478,17 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
     }
   });
 
+  router.delete('/generation-jobs/:id', authMiddleware, async (req, res) => {
+    const id = Number(req.params.id);
+    try {
+      await cancelJob(id, req.user.id);
+      res.json({ cancelled: true });
+    } catch (err) {
+      console.error('Cancel job error:', err);
+      res.status(500).json({ error: 'Failed to cancel job' });
+    }
+  });
+
   router.post('/courses/quick-lesson', authMiddleware, async (req, res) => {
     const {
       query, expandedText, confirmed, isPublic, aiProvider, aiModel, language, promptType,
@@ -515,7 +527,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
         type: 'quick-lesson',
       });
 
-      startBackgroundJob(job.id, async (onProgress) => {
+      startBackgroundJob(job.id, async (onProgress, isCancelled) => {
         const result = await generateVideo({
           text: expandedText,
           originalTopic: query.trim(),
@@ -527,6 +539,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
           videoDir,
           callLlm,
           onProgress,
+          isCancelled,
         });
 
         const video = await db.video.create({

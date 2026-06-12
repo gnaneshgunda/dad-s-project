@@ -15,23 +15,57 @@ const { resolveEdgeVoice } = require('./voices');
 const { uploadVideo, uploadAudio } = require('./storage');
 
 async function generateAudioFile(text, voice, filepath) {
-  await new Promise((resolve, reject) => {
-    const child = spawn('node', ['generateAudioChild.js', text, voice, filepath], {
-      cwd: path.join(__dirname, '..'),
-    });
-    child.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error('Audio generation failed'));
-    });
-    child.on('error', reject);
-  });
+  const MAX_RETRIES = 2;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await new Promise((resolve, reject) => {
+        const child = spawn('node', ['generateAudioChild.js', text, voice, filepath], {
+          cwd: path.join(__dirname, '..'),
+        });
+        child.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`Audio child exited with code ${code}`));
+        });
+        child.on('error', reject);
+      });
+
+      // Verify the file was actually written and is non-empty
+      if (fs.existsSync(filepath) && fs.statSync(filepath).size > 100) {
+        return; // success
+      }
+      throw new Error('Audio file is empty or missing after TTS');
+    } catch (err) {
+      if (attempt < MAX_RETRIES) {
+        console.warn(`TTS attempt ${attempt + 1} failed for voice "${voice}", retrying in 1s...`);
+        await new Promise((r) => setTimeout(r, 1000));
+      } else {
+        // All retries exhausted — generate a 2-second silence file so the
+        // video can still be produced (better a silent slide than a crash)
+        console.warn(`TTS failed after ${MAX_RETRIES + 1} attempts — generating silence fallback`);
+        await new Promise((resolve, reject) => {
+          ffmpeg()
+            .input('anullsrc=r=24000:cl=mono')
+            .inputFormat('lavfi')
+            .duration(2)
+            .outputOptions(['-c:a', 'libmp3lame', '-b:a', '48k'])
+            .save(filepath)
+            .on('end', resolve)
+            .on('error', reject);
+        });
+      }
+    }
+  }
 }
 
 function getAudioDuration(filepath) {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(filepath, (err, metadata) => {
-      if (err) reject(err);
-      else resolve(metadata.format.duration);
+      if (err) {
+        console.warn('ffprobe failed, using fallback duration of 2s:', err.message);
+        resolve(2.0); // fallback so the pipeline doesn't crash
+      } else {
+        resolve(metadata.format.duration || 2.0);
+      }
     });
   });
 }
@@ -63,6 +97,10 @@ function buildQuizTimestamps(rawQuizzes, slideEndTimes) {
     .sort((a, b) => a.timestamp_seconds - b.timestamp_seconds);
 }
 
+class CancellationError extends Error {
+  constructor() { super('Job was cancelled'); this.isCancellation = true; }
+}
+
 async function generateVideo({
   text,
   originalTopic,
@@ -74,7 +112,11 @@ async function generateVideo({
   videoDir,
   callLlm,
   onProgress,
+  isCancelled,
 }) {
+  const checkCancelled = () => {
+    if (isCancelled && isCancelled()) throw new CancellationError();
+  };
   const report = (step, percent) => { if (onProgress) onProgress(step, percent); };
   const videoFilename = `${uuidv4()}.mp4`;
   const combinedAudioFilename = `${uuidv4()}.mp3`;
@@ -123,6 +165,8 @@ async function generateVideo({
       };
     }
 
+    checkCancelled(); // between Stage 1 and Stage 2
+
     // Stage 2 — Slide writer: execute blueprint
     console.log('Stage 2: writing slides from blueprint...');
     const slidePrompt = buildDynamicSlidePrompt(blueprint, userQuery, mode);
@@ -158,8 +202,11 @@ async function generateVideo({
     let totalAudioDuration = 0;
     const slideEndTimes = [];
 
+    checkCancelled(); // before entering the per-slide render loop
+
     report('rendering', 60);
     for (let i = 0; i < slides.length; i++) {
+      checkCancelled(); // between slides
       report('rendering', 60 + Math.floor((i / slides.length) * 25));
       const slide = slides[i];
       const narrationText = slide.narration_text || slide.explanation_content || ' ';

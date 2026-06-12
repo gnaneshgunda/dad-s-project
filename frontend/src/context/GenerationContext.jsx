@@ -103,8 +103,19 @@ export function GenerationProvider({ children }) {
     };
   }, [pollJobs]);
 
+  const cancelJob = useCallback(async (jobId) => {
+    // Optimistically remove from local state immediately
+    setJobs((prev) => prev.filter((j) => j.id !== jobId));
+    try {
+      await api.delete(`/api/generation-jobs/${jobId}`);
+    } catch {
+      // Non-fatal — the backend cancellation may still have succeeded
+    }
+    pollJobs();
+  }, [pollJobs]);
+
   return (
-    <GenerationContext.Provider value={{ jobs, trackJob, removeJob, dismissFailed, pollJobs }}>
+    <GenerationContext.Provider value={{ jobs, trackJob, removeJob, dismissFailed, cancelJob, pollJobs }}>
       {children}
     </GenerationContext.Provider>
   );

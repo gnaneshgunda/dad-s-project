@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import {
   Loader2, ChevronLeft, Play, RefreshCw, Lock, Globe, Video,
-  PanelLeft, PanelLeftClose, Maximize2, Minimize2, Eye,
+  PanelLeft, PanelLeftClose, Maximize2, Minimize2, Eye, X,
 } from 'lucide-react';
 import api from '../lib/api';
 import { API_BASE_URL } from '../lib/config';
@@ -16,7 +16,7 @@ export default function Course() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const highlightChapterId = searchParams.get('chapter');
-  const { trackJob, jobs } = useGeneration();
+  const { trackJob, jobs, cancelJob } = useGeneration();
   const [course, setCourse] = useState(null);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
@@ -254,9 +254,24 @@ export default function Course() {
                               <Eye className="h-2.5 w-2.5" /> Watched
                             </span>
                           )}
-                          {generating && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
-                              {percent != null ? `${percent}%` : 'Generating…'}
+                        {generating && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 flex items-center gap-1">
+                              {percent != null ? `${percent}%` : 'Queued…'}
+                              <button
+                                type="button"
+                                title="Cancel generation"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (job) {
+                                    await cancelJob(job.id);
+                                    loadCourse();
+                                    setToast({ message: `"${chapter.name}" generation cancelled`, type: 'success' });
+                                  }
+                                }}
+                                className="ml-0.5 hover:text-red-600 transition-colors"
+                              >
+                                <X className="h-2.5 w-2.5" />
+                              </button>
                             </span>
                           )}
                         </div>
