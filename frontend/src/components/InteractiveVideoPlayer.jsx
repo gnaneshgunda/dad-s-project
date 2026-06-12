@@ -42,10 +42,17 @@ function InteractiveVideoPlayer({
     everAnsweredRef.current = {};
     setActiveQuiz(null);
     activeQuizRef.current = null;
+    lastTriggeredTimestampRef.current = null;
     setCurrentTime(0);
     setDuration(0);
     setIsBuffering(true);
     setLoadError(null);
+    // Force the browser to abandon the cached stream and fetch the new source.
+    // Without this, the native <video> element ignores src prop changes and
+    // keeps playing the previously buffered video.
+    if (videoRef.current) {
+      videoRef.current.load();
+    }
   }, [videoUrl]);
 
   useEffect(() => {
