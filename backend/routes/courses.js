@@ -92,7 +92,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
 
   router.post('/courses/plan', authMiddleware, async (req, res) => {
     const {
-      query, learningScope, isPublic, aiProvider, aiModel, promptType, language,
+      query, learningScope, isPublic, aiProvider, aiModel, promptType, language, regenerate,
     } = req.body;
     if (!query?.trim()) return res.status(400).json({ error: 'query is required' });
 
@@ -100,6 +100,20 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
     const searchQuery = normalizeSearchQuery(query);
 
     try {
+      // Idempotency: return existing course unless regenerate is requested
+      if (!regenerate) {
+        const existing = await db.subject.findFirst({
+          where: { userId: req.user.id, searchQuery, learningScope: scope },
+          include: { chapters: { orderBy: { sortOrder: 'asc' } } },
+        });
+        if (existing) {
+          return res.status(201).json({
+            subject: existing,
+            curriculum: existing.curriculumJson ? JSON.parse(existing.curriculumJson) : null,
+          });
+        }
+      }
+
       const raw = await callLlm(
         buildCurriculumPrompt(query.trim(), scope),
         aiProvider,
@@ -155,6 +169,13 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
         },
       });
       if (!source) return res.status(404).json({ error: 'Public course not found' });
+
+      // Idempotency: return existing copy if user already has one from this source
+      const existingCopy = await db.subject.findFirst({
+        where: { userId: req.user.id, sourceSubjectId: sourceId },
+        include: { chapters: { orderBy: { sortOrder: 'asc' }, include: { videos: true } } },
+      });
+      if (existingCopy) return res.status(201).json(existingCopy);
 
       const copy = await db.subject.create({
         data: {
@@ -494,7 +515,7 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
 
   router.post('/courses/quick-lesson', authMiddleware, async (req, res) => {
     const {
-      query, expandedText, confirmed, isPublic, aiProvider, aiModel, language, promptType,
+      query, expandedText, confirmed, isPublic, aiProvider, aiModel, language, promptType, regenerate,
     } = req.body;
     if (!confirmed) return res.status(400).json({ error: 'User confirmation required' });
     if (!query?.trim() || !expandedText?.trim()) {
@@ -503,6 +524,28 @@ function initCoursesRouter({ callLlm, generateVideo, audioDir, videoDir }) {
 
     const searchQuery = normalizeSearchQuery(query);
     try {
+      // Idempotency: return existing job unless regenerate is requested
+      if (!regenerate) {
+        const existingSubject = await db.subject.findFirst({
+          where: { userId: req.user.id, searchQuery, learningScope: 'quick-lesson' },
+          include: { chapters: { include: { videos: { take: 1 } } } },
+        });
+        if (existingSubject) {
+          const ch = existingSubject.chapters[0];
+          const existingJob = ch ? await db.generationJob.findFirst({
+            where: { chapterId: ch.id, status: { in: ['pending', 'running', 'completed'] } },
+            orderBy: { createdAt: 'desc' },
+          }) : null;
+          if (existingJob) {
+            return res.status(202).json({
+              jobId: existingJob.id,
+              subjectId: existingSubject.id,
+              chapterId: ch.id,
+            });
+          }
+        }
+      }
+
       const subject = await db.subject.create({
         data: {
           name: query.trim().substring(0, 100),

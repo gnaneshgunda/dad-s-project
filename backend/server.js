@@ -304,7 +304,7 @@ app.get('/api/voices', (_req, res) => {
 });
 
 app.post('/api/generate-video', authMiddleware, async (req, res) => {
-  const { text, aiProvider, aiModel, language, chapterId, title, promptType, originalTopic } = req.body;
+  const { text, aiProvider, aiModel, language, chapterId, title, promptType, originalTopic, regenerate } = req.body;
 
   if (!text) {
     return res.status(400).json({ error: 'text is required' });
@@ -320,6 +320,24 @@ app.post('/api/generate-video', authMiddleware, async (req, res) => {
     });
     if (!chapter) {
       return res.status(404).json({ error: 'Chapter not found' });
+    }
+
+    // Idempotency: return existing video unless regenerate is requested
+    if (!regenerate) {
+      const existingVideo = await db.video.findFirst({
+        where: { chapterId: chapter.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (existingVideo) {
+        return res.json({
+          videoUrl: existingVideo.videoUrl,
+          audioUrl: existingVideo.audioUrl,
+          interactiveQuizzes: existingVideo.quizzesJson ? JSON.parse(existingVideo.quizzesJson) : [],
+          videoId: existingVideo.id,
+        });
+      }
+    } else {
+      await db.video.deleteMany({ where: { chapterId: chapter.id } });
     }
 
     const result = await generateVideo({
@@ -424,6 +442,17 @@ app.post('/api/history', authMiddleware, async (req, res) => {
   }
 
   try {
+    // Idempotency: avoid duplicate history entries for the same content within 10s
+    const recent = await db.history.findFirst({
+      where: {
+        userId,
+        title: title || 'Untitled',
+        text: text || null,
+        createdAt: { gte: new Date(Date.now() - 10_000) },
+      },
+    });
+    if (recent) return res.status(201).json(recent);
+
     const historyItem = await db.history.create({
       data: {
         userId,

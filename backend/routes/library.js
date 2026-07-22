@@ -48,6 +48,12 @@ router.post('/subjects', authMiddleware, async (req, res) => {
   }
 
   try {
+    // Idempotency: prevent duplicate subjects with the same name for the same user
+    const existing = await db.subject.findFirst({
+      where: { name: name.trim(), userId: req.user.id },
+    });
+    if (existing) return res.status(201).json(existing);
+
     const subject = await db.subject.create({
       data: { name: name.trim(), userId: req.user.id },
     });
